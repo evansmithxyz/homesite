@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Evan Smith</title>
+    <meta name="description" content="Sentence Diagrammer and Cube Timer, two projects that run in the browser." />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <script>
+      // The diagrammer used to live at this address, so its old share links (/#s=…) go on to its folder,
+      // also when one is opened while this page is already showing (only the hash changes then)
+      const forward = () => {
+        if (new URLSearchParams(location.hash.slice(1)).has('s')) location.replace('diagrammer/' + location.hash);
+      };
+      forward();
+      addEventListener('hashchange', forward);
+    </script>
+    <script type="module" src="ascii.js"></script>
+    <style>
+      :root {
+        --bg: #eef1f5;
+        --surface: #ffffff;
+        --art: #f4f6f9;
+        --line: #d8dee7;
+        --text: #1b2230;
+        --muted: #566072;
+        --stroke: #1f2a44;
+        --focus: #2f62d8;
+        --c-subj: #2f7d32;
+        --c-verb: #c2410c;
+        --c-obj: #1d64c2;
+        --shadow: 0 1px 2px rgba(20, 30, 50, 0.06), 0 12px 28px -18px rgba(20, 30, 50, 0.35);
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12151b;
+          --surface: #1a1e26;
+          --art: #20242e;
+          --line: #2d3341;
+          --text: #e7eaf0;
+          --muted: #9ba4b4;
+          --stroke: #c9cfda;
+          --focus: #7ea6ff;
+          --c-subj: #84d272;
+          --c-verb: #ff9a76;
+          --c-obj: #7db4ff;
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 32px -18px rgba(0, 0, 0, 0.8);
+          color-scheme: dark;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      /* the ASCII background (ascii.js), behind everything */
+      #ascii {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: clamp(56px, 14vw, 120px) 16px 64px;
+      }
+      h1 {
+        margin: 0 0 clamp(36px, 8vw, 64px);
+        font: 600 clamp(42px, 9vw, 72px) / 1.05 ui-serif, Georgia, 'Times New Roman', serif;
+        letter-spacing: -0.015em;
+      }
+      h2 {
+        margin: 0 0 14px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .projects {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+        gap: 16px;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        /* frosted glass: the background shows through, blurred, so the text stays easy to read */
+        background: color-mix(in srgb, var(--surface) 78%, transparent);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        color: inherit;
+        text-decoration: none;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+      }
+      .card:hover {
+        border-color: var(--muted);
+        box-shadow: var(--shadow);
+        transform: translateY(-2px);
+      }
+      .card:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+      }
+      .art {
+        display: grid;
+        place-items: center;
+        height: 160px;
+        background: color-mix(in srgb, var(--art) 60%, transparent);
+        border-bottom: 1px solid var(--line);
+      }
+      .art svg {
+        height: 118px;
+        width: auto;
+        max-width: 86%;
+      }
+      .body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        flex: 1;
+        padding: 18px 20px 20px;
+      }
+      h3 {
+        margin: 0;
+        font-size: 19px;
+        line-height: 1.3;
+      }
+      h3 .go {
+        display: inline-block;
+        color: var(--muted);
+        transition: transform 0.15s;
+      }
+      .card:hover h3 .go {
+        transform: translateX(3px);
+      }
+      .body p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .body .meta {
+        margin-top: auto;
+        padding-top: 8px;
+        font-size: 13px;
+      }
+
+      /* the diagram on the Sentence Diagrammer card */
+      .diagram line {
+        stroke: var(--stroke);
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+      .diagram text {
+        font-family: ui-serif, Georgia, 'Times New Roman', serif;
+        font-size: 19px;
+        fill: var(--text);
+      }
+      .diagram .mod {
+        font-size: 14px;
+        fill: var(--muted);
+      }
+      .diagram .subj {
+        fill: var(--c-subj);
+      }
+      .diagram .verb {
+        fill: var(--c-verb);
+      }
+      .diagram .obj {
+        fill: var(--c-obj);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .card,
+        h3 .go {
+          transition: none;
+        }
+        .card:hover,
+        .card:hover h3 .go {
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="ascii" aria-hidden="true"></canvas>
+    <main>
+      <h1 data-clear data-scramble>Evan Smith</h1>
+
+      <section aria-labelledby="projects-heading">
+        <h2 id="projects-heading" data-clear>Projects</h2>
+        <ul class="projects">
+          <li>
+            <a class="card" href="diagrammer/">
+              <div class="art">
+                <!-- "The dog chased the cat", Reed–Kellogg style -->
+                <svg class="diagram" viewBox="0 0 260 104" aria-hidden="true">
+                  <line x1="14" y1="54" x2="246" y2="54" />
+                  <line x1="94" y1="30" x2="94" y2="74" />
+                  <line x1="184" y1="34" x2="184" y2="54" />
+                  <line x1="38" y1="54" x2="60" y2="90" />
+                  <line x1="200" y1="54" x2="222" y2="90" />
+                  <text class="subj" x="54" y="47" text-anchor="middle">dog</text>
+                  <text class="verb" x="139" y="47" text-anchor="middle">chased</text>
+                  <text class="obj" x="216" y="47" text-anchor="middle">cat</text>
+                  <text class="mod" transform="translate(45 60) rotate(58.6)" y="-4">The</text>
+                  <text class="mod" transform="translate(207 60) rotate(58.6)" y="-4">the</text>
+                </svg>
+              </div>
+              <div class="body">
+                <h3>Sentence Diagrammer <span class="go" aria-hidden="true">→</span></h3>
+                <p>
+                  Type a sentence and watch it diagrammed Reed–Kellogg style. Drag words to show your own reading, or
+                  learn it step by step in Guided mode.
+                </p>
+                <p class="meta">Works in any modern browser</p>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a class="card" href="cube/">
+              <div class="art">
+                <!-- a cube one U turn from solved -->
+                <svg viewBox="16 8 88 90" aria-hidden="true">
+                  <defs>
+                    <g id="cube-row">
+                      <rect x="0.07" y="0.07" width="0.86" height="0.86" rx="0.14" />
+                      <rect x="1.07" y="0.07" width="0.86" height="0.86" rx="0.14" />
+                      <rect x="2.07" y="0.07" width="0.86" height="0.86" rx="0.14" />
+                    </g>
+                  </defs>
+                  <path d="M60 14 93.77 33.5v39L60 92 26.23 72.5v-39z" fill="#15161a" stroke="#15161a" stroke-width="2" stroke-linejoin="round" />
+                  <g transform="matrix(11.258 6.5 -11.258 6.5 60 14)" fill="#f4f4ef">
+                    <use href="#cube-row" />
+                    <use href="#cube-row" y="1" />
+                    <use href="#cube-row" y="2" />
+                  </g>
+                  <g transform="matrix(11.258 6.5 0 13 26.23 33.5)" fill="#0ba84f">
+                    <use href="#cube-row" fill="#d4142d" />
+                    <use href="#cube-row" y="1" />
+                    <use href="#cube-row" y="2" />
+                  </g>
+                  <g transform="matrix(11.258 -6.5 0 13 60 53)" fill="#d4142d">
+                    <use href="#cube-row" fill="#1460d6" />
+                    <use href="#cube-row" y="1" />
+                    <use href="#cube-row" y="2" />
+                  </g>
+                </svg>
+              </div>
+              <div class="body">
+                <h3>Cube Timer <span class="go" aria-hidden="true">→</span></h3>
+                <p>
+                  A speedcubing timer for GAN smart cubes: a live 3D copy of your cube, scramble tracking, stage
+                  splits for CFOP, Roux or layer by layer, and an algorithm drill mode.
+                </p>
+                <p class="meta">Chrome or Edge · no smart cube? Use the keyboard</p>
+              </div>
+            </a>
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

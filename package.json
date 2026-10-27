@@ -1,0 +1,14 @@
+{
+  "name": "homesite",
+  "private": true,
+  "version": "0.1.0",
+  "description": "evansmith.xyz: a homepage linking Sentence Diagrammer and Cube Timer, each in its own folder.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  }
+}
