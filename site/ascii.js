@@ -18,10 +18,10 @@
 // on its canvas: data-koi="1" data-lilies="1". The name in the heading unscrambles itself on load.
 // With reduced motion, the pond holds still and the name just shows.
 
-// The water's look (or ?water=): 'classic', the site's first background, a field of noise swirling
-// under drifting washes of color; or 'waves', a surface that carries every ripple and wake, drawn as
-// the lines of its crests, in the color of the sky it reflects
-const LOOK = 'classic';
+// The water's look (or ?water=): 'waves', a surface that carries every ripple and wake, drawn as
+// the lines of its crests, in the color of the sky it reflects; or 'classic', the site's first
+// background, a field of noise swirling under drifting washes of color
+const LOOK = 'waves';
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
 const GLYPHS = '!<>-_\\/[]{}=+*^?#%@&'; // what the name shows while it unscrambles

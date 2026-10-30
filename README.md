@@ -35,11 +35,17 @@ white procession of koi at New Year (1–3 January). To see one that isn't happe
 `/?time=night` (or `dawn`, `day`, `dusk`), `/?weather=rain`, `/?holiday=halloween` (or `obon`, `newyear`),
 `/?koi=golden`, or several at once. It holds still for visitors who ask for reduced motion.
 
+The water has two looks, chosen by `LOOK` at the top of `site/ascii.js`: `'waves'`, the default, a surface that carries
+every ripple and wake, drawn in flowing lines as woodblock prints draw water, in the color of the sky; and `'classic'`,
+the site's first background, a field of noise swirling under drifting washes of color. See the other with
+`/?water=classic`.
+
 A missing address anywhere on the site, also under `/diagrammer/` and `/cube/`, gets `site/404.html`: a quieter pond,
 one koi and one pad, that swims over to the way back home. Caddy serves it with the 404 status (`handle_errors` in
 `deploy/Caddyfile`), at the address that wasn't found, so it links its own files from the root (`/ascii.js`).
-To add a project, add it to the list in
-`scripts/build.mjs`, a card to the homepage, a folder to `scripts/deploy.sh` and a route to `deploy/Caddyfile`.
+
+To add a project, add it to the list in `scripts/build.mjs`, a card to the homepage, a folder to `scripts/deploy.sh`
+and a route to `deploy/Caddyfile`.
 
 ## Put it on the server
 
