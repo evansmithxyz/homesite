@@ -45,6 +45,12 @@ evansmith.xyz {
 	# file names under assets/ change with every build, so they can be cached for good
 	@hashed path /diagrammer/assets/* /cube/assets/*
 	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# every other file keeps its name from one deploy to the next (the homepage and its script, each
+	# app's index.html), so browsers ask each time whether it changed: unchanged costs only a 304, and
+	# a deploy shows up on the next visit (a stale index.html would ask for assets the deploy removed)
+	@named not path /api/* /diagrammer/assets/* /cube/assets/*
+	header @named Cache-Control "no-cache"
 }
 
 www.evansmith.xyz {
