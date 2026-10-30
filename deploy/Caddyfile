@@ -9,6 +9,15 @@
 evansmith.xyz {
 	encode zstd gzip
 
+	# every request, one JSON line each; rolled at 10 MiB, old files gzipped, gone after 90 days
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 20
+			roll_keep_for 2160h
+		}
+	}
+
 	# the parse server sees /parse and /health, without the /api prefix
 	handle_path /api/* {
 		reverse_proxy 127.0.0.1:8000
