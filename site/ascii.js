@@ -254,7 +254,9 @@ let chars = new Uint16Array(0); // per cell: its character,
 let looks = new Uint8Array(0); // its style,
 let clear = new Float32Array(0); // and how much of the pond shows there (0 right by a data-clear element)
 let rowOf = []; // per style, one row of character codes, for drawing a row in one go
-let seen = new Uint8Array(0); // per style, whether the row being drawn has any
+let seen = new Uint8Array(0); // per style, whether the row being drawn has any,
+let first = new Uint16Array(0); // and in which columns its first and last are
+let final = new Uint16Array(0);
 let theme = THEMES.dark;
 let styles = []; // per style, [color, opacity]
 const koi = [];
@@ -285,6 +287,8 @@ function setTheme() {
   for (const color of theme.koi) for (const a of DEPTHS) styles.push([color, a]);
   styles.push(...theme[season]);
   seen = new Uint8Array(styles.length);
+  first = new Uint16Array(styles.length);
+  final = new Uint16Array(styles.length);
 }
 
 function resize() {
@@ -294,7 +298,8 @@ function resize() {
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const size = W < 600 ? 12 : 14;
+  // small characters, for a fine grid: the finer it is, the smoother the koi, pads and ripples
+  const size = W < 600 ? 9 : 10;
   ctx.font = `${size}px ${FONT}`;
   ctx.textBaseline = 'top';
   ctx.fontKerning = 'none';
@@ -306,6 +311,7 @@ function resize() {
   chars = new Uint16Array(cols * rows);
   looks = new Uint8Array(cols * rows);
   clear = new Float32Array(cols * rows);
+  cleared = ''; // so it's worked out again
   rowOf = styles.map(() => new Uint16Array(cols));
 
   const r = Math.min(Math.max(Math.min(W, H) * 0.055, 24), 58);
@@ -1212,8 +1218,13 @@ function stamp(x0, y0, x1, y1, dist, look) {
   }
 }
 
+let cleared = ''; // where the data-clear elements were when `clear` was last worked out
+
 function draw(t) {
   boxes = clearings.map(textBox);
+  const where = `${cols} ${rows} ${boxes.map((b) => `${b.left} ${b.top} ${b.right} ${b.bottom}`)}`;
+  const moved = where !== cleared;
+  cleared = where;
 
   // the water, with any ripples spreading over it
   for (let r = 0; r < rows; r++) {
@@ -1221,8 +1232,8 @@ function draw(t) {
     for (let c = 0; c < cols; c++) {
       const px = (c + 0.5) * cw;
       const i = r * cols + c;
-      const k = clearAt(px, py, null);
-      clear[i] = k;
+      if (moved) clear[i] = clearAt(px, py, null);
+      const k = clear[i];
       chars[i] = 32;
       if (k <= 0) continue;
 
@@ -1322,7 +1333,7 @@ function draw(t) {
 }
 
 // Draws the cells in styles from..to-1: one string per style and row, as monospace keeps each
-// character in its cell
+// character in its cell, running only from the style's first character in the row to its last
 function paint(from, to) {
   for (let r = 0; r < rows; r++) {
     seen.fill(0);
@@ -1331,16 +1342,19 @@ function paint(from, to) {
       const s = looks[i];
       if (chars[i] === 32 || s < from || s >= to) continue;
       if (!seen[s]) {
-        rowOf[s].fill(32);
+        rowOf[s].fill(32, c);
         seen[s] = 1;
+        first[s] = c;
       }
       rowOf[s][c] = chars[i];
+      final[s] = c;
     }
     for (let s = from; s < to; s++) {
       if (!seen[s]) continue;
       ctx.fillStyle = styles[s][0];
       ctx.globalAlpha = styles[s][1];
-      ctx.fillText(String.fromCharCode.apply(null, rowOf[s]), 0, r * ch + lift);
+      const text = String.fromCharCode.apply(null, rowOf[s].subarray(first[s], final[s] + 1));
+      ctx.fillText(text, first[s] * cw, r * ch + lift);
     }
   }
 }
@@ -1357,14 +1371,19 @@ function wash(x, y, spread, color, alpha) {
 }
 
 let last = 0;
+let cost = 0; // how long a frame takes to work out and draw, on average, in ms
 function loop(now) {
   if (still.matches) return draw(0);
   requestAnimationFrame(loop);
-  if (now - last < 12) return; // at most about 60 frames a second, also on faster screens
+  // at most about 60 frames a second, also on faster screens, and fewer where each takes a while to
+  // draw, so the page itself stays quick to scroll and click
+  if (now - last < Math.max(12, cost * 1.6)) return;
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
+  const start = performance.now();
   step(now / 1000, dt);
   draw(now / 1000);
+  cost += (performance.now() - start - cost) * 0.1;
 }
 
 addEventListener('pointermove', (e) => {
