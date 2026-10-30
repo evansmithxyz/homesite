@@ -18,6 +18,10 @@
 // on its canvas: data-koi="1" data-lilies="1". The name in the heading unscrambles itself on load.
 // With reduced motion, the pond holds still and the name just shows.
 
+// The water's look (or ?water=): 'waves', a surface that carries every ripple and wake, drawn as
+// the lines of its crests, in the color of the sky it reflects; or 'classic', the site's first
+// background, a field of noise swirling under drifting washes of color
+const LOOK = 'waves';
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
 const GLYPHS = '!<>-_\\/[]{}=+*^?#%@&'; // what the name shows while it unscrambles
@@ -34,6 +38,8 @@ const THEMES = {
       dusk: ['#ff9a76', '#c58cff', '#ffb35c'],
       night: ['#3b5bab', '#6a5acd', '#2a7f8f'],
     },
+    // the sky, by the time of day, as the waves reflect it
+    sky: { dawn: '#e9b6c6', day: '#9fc4e8', dusk: '#f0a77c', night: '#7f95c9' },
     ring: ['#c3d7ff', 0.8],
     mirror: '#e7eaf0', // a reflection, in the heading's color
     mirrorAlpha: [0.4, 0.27, 0.15], // from the waterline down
@@ -68,6 +74,7 @@ const THEMES = {
       dusk: ['#c2410c', '#9333ea', '#b45309'],
       night: ['#1e3a8a', '#4338ca', '#0f5f6e'],
     },
+    sky: { dawn: '#b0547a', day: '#2f6aa8', dusk: '#b5562a', night: '#2c3f7a' },
     ring: ['#1d64c2', 0.6],
     mirror: '#1b2230',
     mirrorAlpha: [0.32, 0.21, 0.12],
@@ -176,6 +183,7 @@ const ctx = canvas.getContext('2d');
 const still = matchMedia('(prefers-reduced-motion: reduce)');
 const dark = matchMedia('(prefers-color-scheme: dark)');
 const asked = new URLSearchParams(location.search); // a season, time or weather to show instead
+const look = ['classic', 'waves'].includes(asked.get('water')) ? asked.get('water') : LOOK;
 const south = southern();
 const season = seasonNow();
 const holiday = holidayNow();
@@ -304,7 +312,7 @@ let drawnAt = 0; // the time the frame being drawn shows, in seconds
 function setTheme() {
   theme = dark.matches ? THEMES.dark : THEMES.light;
   styles = [
-    ...theme.waterAlpha.map((a) => [theme.water, a]),
+    ...theme.waterAlpha.map((a) => [look === 'waves' ? theme.sky[time] : theme.water, a]),
     theme.ring,
     ...theme.mirrorAlpha.map((a) => [theme.mirror, a]),
     theme.leaf,
@@ -350,6 +358,10 @@ function resize() {
   clear = new Float32Array(cols * rows);
   cleared = ''; // so it's worked out again
   rowOf = styles.map(() => new Uint16Array(cols));
+  if (look === 'waves') {
+    [across, down] = [Math.ceil(W / SPAN) + 1, Math.ceil(H / SPAN) + 1];
+    [wave, was] = [new Float32Array(across * down), new Float32Array(across * down)];
+  }
 
   const r = Math.min(Math.max(Math.min(W, H) * 0.055, 24), 58);
   lilies.length = 0;
@@ -619,6 +631,8 @@ function swim(f, t, dt) {
   // now and then a koi sinks deeper, fading, and more so in the rain; it comes up to feed
   const deep = meal ? 0 : clamp01(noise(t * 0.04, f.seed + 40) * 1.5 + 0.15 + rain * 0.5);
   f.depth += (deep - f.depth) * Math.min(1, dt * 0.6);
+  // near the surface, it pushes the water aside as it swims, leaving a wake
+  if (look === 'waves') poke(f.x, f.y, -0.04 * (f.speed / 30) * (1 - f.depth) * dt * 60, 8);
 
   // the body follows the head, keeping each bend gentle
   const tr = f.trail;
@@ -799,6 +813,7 @@ function surface(px, py, t) {
 // a splash spreads three rings, the small ones (the pointer's wake, a koi gulping food) one
 function ripple(x, y, strength, t) {
   if (still.matches) return;
+  if (look === 'waves') poke(x, y, -strength * strength * 2.4, 6 + strength * 8); // something dropping in
   const big = strength > 0.7;
   ripples.push({ x, y, t, strength, rings: big ? 3 : 1, speed: big ? 110 : 60, life: big ? 3 : 1.5 });
   if (ripples.length > 24) ripples.shift();
@@ -815,6 +830,12 @@ let bendY = 0;
 function bend(px, py, t) {
   bendX = 0;
   bendY = 0;
+  if (look === 'waves') {
+    // the waves themselves: the steeper they are, the farther things are pushed and the light bent
+    slope(px, py);
+    [bendX, bendY] = [-slopeX * 40, -slopeY * 40];
+    return;
+  }
   for (const rp of ripples) {
     const dx = px - rp.x;
     const dy = py - rp.y;
@@ -826,6 +847,103 @@ function bend(px, py, t) {
     bendX += (dx / d) * swell;
     bendY += (dy / d) * swell;
   }
+}
+
+// ---------- the water, as waves ----------
+// The surface is a grid of heights, a little over the grid of characters, stepped with the wave
+// equation: each point is pulled toward its neighbors, so a push spreads out as rings, which cross,
+// bounce off the pond's edges and die away. What drops in, what swims by and the pointer push it.
+// Over it runs the wind's long swell. It's drawn in lines, as woodblock prints draw water: where the
+// height passes a level, an outline character runs along it, like the koi's and the pads'. The
+// swell's lines flow across the pond, and the ripples' own crests ride over them, brighter.
+
+const SPAN = 8; // px between the surface's points
+const PULL = 0.08; // how hard each point is pulled toward its neighbors a step: the waves' speed
+const CALM = 0.992; // how much of a wave is left after a step
+const CREST = 0.25; // the height a ripple's crest is drawn at
+let across = 0; // points across the surface, and down it
+let down = 0;
+let wave = new Float32Array(0); // the surface's height at each point,
+let was = new Float32Array(0); // and a step ago
+// the swell: trains of long waves, each its wave number across and down (radians a px), its speed
+// (radians a second) and its height
+const SWELL = [
+  [0.012, 0.06, 0.5, 1],
+  [-0.02, 0.035, 0.3, 0.35],
+];
+
+// raises the surface around a point (lowers it, for a negative amount), over about r px
+function poke(x, y, amount, r) {
+  if (!wave.length) return;
+  const [gx, gy, R] = [x / SPAN, y / SPAN, r / SPAN];
+  for (let j = Math.max(1, Math.floor(gy - 2 * R)); j <= Math.min(down - 2, Math.ceil(gy + 2 * R)); j++) {
+    for (let i = Math.max(1, Math.floor(gx - 2 * R)); i <= Math.min(across - 2, Math.ceil(gx + 2 * R)); i++) {
+      wave[j * across + i] += amount * Math.exp(-((i - gx) ** 2 + (j - gy) ** 2) / (R * R));
+    }
+  }
+}
+
+// the waves move on, a step for each 60th of a second; the pond's edges hold still, so they bounce
+function surge(dt) {
+  for (let n = Math.min(3, Math.max(1, Math.round(dt * 60))); n > 0; n--) {
+    for (let j = 1; j < down - 1; j++) {
+      for (let i = 1; i < across - 1; i++) {
+        const k = j * across + i;
+        const pull = wave[k - 1] + wave[k + 1] + wave[k - across] + wave[k + across] - 4 * wave[k];
+        was[k] = (2 * wave[k] - was[k] + PULL * pull) * CALM;
+      }
+    }
+    [wave, was] = [was, wave];
+  }
+}
+
+// the surface's height at a point, between its four nearest points
+function heightAt(x, y) {
+  const [gx, gy] = [x / SPAN, y / SPAN];
+  const [i, j] = [Math.floor(gx), Math.floor(gy)];
+  if (i < 0 || j < 0 || i >= across - 1 || j >= down - 1) return 0;
+  const [fx, fy] = [gx - i, gy - j];
+  const k = j * across + i;
+  const top = wave[k] + (wave[k + 1] - wave[k]) * fx;
+  return top + (wave[k + across] + (wave[k + across + 1] - wave[k + across]) * fx - top) * fy;
+}
+
+// how steeply the ripples slope at a point, a height a px across and down, in slopeX and slopeY
+let slopeX = 0;
+let slopeY = 0;
+function slope(x, y) {
+  slopeX = (heightAt(x + SPAN / 2, y) - heightAt(x - SPAN / 2, y)) / SPAN;
+  slopeY = (heightAt(x, y + SPAN / 2) - heightAt(x, y - SPAN / 2)) / SPAN;
+}
+
+// draws the line where the surface passes a height, if it crosses cell i: h and (gx, gy) are the
+// height and slope at the cell's middle
+function contour(i, h, gx, gy, level, style) {
+  const g = Math.hypot(gx, gy);
+  if (g < 1e-4) return false;
+  const [nx, ny, d] = [gx / g, gy / g, (h - level) / g];
+  if (!crosses(nx, ny, d)) return false;
+  chars[i] = edgeChar(nx, ny, d);
+  looks[i] = style;
+  return true;
+}
+
+// One cell of the water: first the ripples' crests, bright (fainter in clear space); then the
+// swell's lines, flowing across, bent by a slow noise so they never run straight, and by the ripples
+// as they pass
+function waveCell(i, px, py, k, t) {
+  let h = heightAt(px, py);
+  slope(px, py);
+  let [gx, gy] = [slopeX, slopeY];
+  if (contour(i, h, gx, gy, CREST, k > 0.7 ? RING : 2)) return;
+  const bent = noise(px * 0.002, py * 0.004 + t * 0.03) * 2.5;
+  for (const [kx, ky, speed, height] of SWELL) {
+    const phase = kx * px + ky * py - speed * t + bent;
+    h += height * Math.sin(phase);
+    gx += height * Math.cos(phase) * kx;
+    gy += height * Math.cos(phase) * ky;
+  }
+  contour(i, h, gx, gy, 0, k > 0.7 ? 2 : 1);
 }
 
 // How much of the pond shows at a point: none right by a data-clear element, fading back in around
@@ -1335,10 +1453,13 @@ function step(t, dt) {
     p.angle += noise(t * 0.03, p.seed + 5) * 0.05 * dt;
   }
   if (t > clock) {
+    const then = time;
     time = timeNow();
     clock = t + 30;
+    if (time !== then) setTheme(); // the waves take the sky's new color
   }
   rainfall(t, dt);
+  if (look === 'waves') surge(dt);
   hold(t);
   for (const f of koi) {
     swim(f, t, dt);
@@ -1419,6 +1540,10 @@ function draw(t) {
       const k = clear[i];
       chars[i] = 32;
       if (k <= 0) continue;
+      if (look === 'waves') {
+        waveCell(i, px, py, k, t);
+        continue;
+      }
 
       // a ripple's rings, traced
       let ring = 0;
@@ -1497,15 +1622,18 @@ function draw(t) {
 
   ctx.clearRect(0, 0, W, H);
   paint(0, LEAF);
-  // washes of color drift over the water alone, before the koi and pads are drawn on top
+  // washes of color drift over the water alone, before the koi and pads are drawn on top (the waves
+  // take the sky's color instead)
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-atop';
   const size = Math.max(W, H) * 0.5;
-  theme.tints[time].forEach((tint, i) => {
-    const x = W * (0.5 + 0.45 * Math.sin(t * (0.05 + i * 0.013) + i * 2.1));
-    const y = H * (0.5 + 0.45 * Math.cos(t * (0.04 + i * 0.017) + i * 1.3));
-    wash(x, y, size, tint, 0.7);
-  });
+  if (look === 'classic') {
+    theme.tints[time].forEach((tint, i) => {
+      const x = W * (0.5 + 0.45 * Math.sin(t * (0.05 + i * 0.013) + i * 2.1));
+      const y = H * (0.5 + 0.45 * Math.cos(t * (0.04 + i * 0.017) + i * 1.3));
+      wash(x, y, size, tint, 0.7);
+    });
+  }
   ctx.globalCompositeOperation = 'source-over';
   paint(LEAF, styles.length);
 }
@@ -1577,6 +1705,7 @@ addEventListener('pointermove', (e) => {
     }
   }
   if (moved > 3) pointer.movedAt = t;
+  if (look === 'waves' && pointer.on && !still.matches) poke(e.clientX, e.clientY, -0.06 * Math.min(1, moved / 25), 8);
   pointer.x = e.clientX;
   pointer.y = e.clientY;
   pointer.t = t;
