@@ -9,7 +9,8 @@
 evansmith.xyz {
 	encode zstd gzip
 
-	# every request, one JSON line each; rolled at 10 MiB, old files gzipped, gone after 90 days
+	# every request, one JSON line each; rolled at 10 MiB, old files gzipped, gone after 90 days.
+	# scripts/logs.sh shows it as one readable line per request.
 	log {
 		output file /var/log/caddy/access.log {
 			roll_size 10MiB
