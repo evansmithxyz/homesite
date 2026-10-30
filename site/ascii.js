@@ -5,8 +5,10 @@
 // outline's slope and where it crosses, so the koi, the pads and the ripples read as drawn lines.
 // It all keeps clear of elements marked data-clear, so the heading stays readable. Elements marked
 // data-reflect are mirrored in the water under them, and ones marked data-lure draw koi to their
-// edge while hovered or focused. The name in the heading unscrambles itself on load. With reduced
-// motion, the pond holds still and the name just shows.
+// edge while hovered or focused. Each season blows something onto the water: cherry blossom in
+// spring, willow leaves in summer, maple leaves in autumn and snow in winter (or the one asked for,
+// as in ?season=spring). The name in the heading unscrambles itself on load. With reduced motion,
+// the pond holds still and the name just shows.
 
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
@@ -25,6 +27,11 @@ const THEMES = {
     lotus: ['#ff9ec4', 0.95],
     food: ['#e6b07a', 0.95],
     koi: ['#ff6a3d', '#f4efe6', '#6b7488', '#ffc247', '#8fb0dd'], // red, white, black, gold, blue
+    // what each season blows onto the water
+    spring: [['#ffc6da', 0.9], ['#ff9ec4', 0.85]],
+    summer: [['#a8db6e', 0.9], ['#d2e27a', 0.8]],
+    autumn: [['#ff6a3d', 0.9], ['#ff9a3c', 0.9], ['#ffc247', 0.9]],
+    winter: [['#e7eaf0', 0.85], ['#c3d7ff', 0.7]],
   },
   light: {
     water: '#35598a',
@@ -37,6 +44,10 @@ const THEMES = {
     lotus: ['#d6457f', 0.9],
     food: ['#8a5a2b', 0.9],
     koi: ['#e04a1f', '#9c9384', '#1f2633', '#d9a011', '#4f76ad'],
+    spring: [['#e0679a', 0.85], ['#d6457f', 0.75]],
+    summer: [['#4c9a48', 0.8], ['#7a9a2a', 0.8]],
+    autumn: [['#d9480f', 0.9], ['#e8790f', 0.9], ['#c99a06', 0.9]],
+    winter: [['#8d9bb3', 0.85], ['#5f7fb0', 0.7]],
   },
 };
 // the styles, by number: the water's first (drawn before the washes of color), then the rest
@@ -48,6 +59,7 @@ const FOOD = 9;
 const KOI = 10; // + color * DEPTHS.length + depth
 const [RED, WHITE, BLACK, GOLD, BLUE] = [0, 1, 2, 3, 4];
 const DEPTHS = [0.95, 0.66, 0.42, 0.24]; // a koi's opacity, from at the surface to deep down
+const DRIFT = KOI + 5 * DEPTHS.length; // + the season's color
 
 // Where a koi's colors fall: u runs along it (0 at the nose, 1 at the tail), v across it (-1..1)
 const VARIETIES = {
@@ -88,6 +100,17 @@ const LILIES = [
   [0.32, 0.96, 0.7, false],
 ];
 
+// What each season blows onto the pond: how many at a time on a screen of about 1440×900, the
+// characters they're drawn with (none: a long thin leaf, drawn as two strokes along it as it turns),
+// and whether they melt where they land
+const SEASONS = {
+  spring: { count: 60, glyphs: "**',`", melts: false }, // cherry blossoms, and loose petals
+  summer: { count: 32, glyphs: '', melts: false }, // willow leaves
+  autumn: { count: 32, glyphs: '*', melts: false }, // maple leaves
+  winter: { count: 70, glyphs: '*+.', melts: true }, // snow
+};
+const WIND = [22, 9]; // px a second, which way things are blown as they fall
+
 const SEGS = 10; // a koi's spine, nose to tail
 const MAX_BEND = 0.24; // radians between neighboring segments, so a koi curves instead of folding
 const PAD = 18; // clear space around data-clear elements, then this much fade back in:
@@ -97,6 +120,7 @@ const canvas = document.getElementById('ascii');
 const ctx = canvas.getContext('2d');
 const still = matchMedia('(prefers-reduced-motion: reduce)');
 const dark = matchMedia('(prefers-color-scheme: dark)');
+const season = seasonNow();
 
 // ---------- 2D simplex noise, after Stefan Gustavson's public-domain version ----------
 
@@ -200,12 +224,15 @@ let chars = new Uint16Array(0); // per cell: its character,
 let looks = new Uint8Array(0); // its style,
 let clear = new Float32Array(0); // and how much of the pond shows there (0 right by a data-clear element)
 let rowOf = []; // per style, one row of character codes, for drawing a row in one go
+let seen = new Uint8Array(0); // per style, whether the row being drawn has any
 let theme = THEMES.dark;
 let styles = []; // per style, [color, opacity]
 const koi = [];
 const lilies = [];
 const ripples = [];
 const food = [];
+const drifts = []; // what the season blew in
+let gusts = 0; // how many more are due to blow in
 const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0 };
 const clearings = [...document.querySelectorAll('[data-clear]')];
 let boxes = [];
@@ -222,6 +249,8 @@ function setTheme() {
     theme.food,
   ];
   for (const color of theme.koi) for (const a of DEPTHS) styles.push([color, a]);
+  styles.push(...theme[season]);
+  seen = new Uint8Array(styles.length);
 }
 
 function resize() {
@@ -255,6 +284,9 @@ function resize() {
     boxes = clearings.map(textBox);
     const count = Math.min(Math.max(Math.round((W * H) / 200000), 3), 9);
     for (let i = 0; i < count; i++) koi.push(makeKoi(SCHOOL[i % SCHOOL.length]));
+    // the pond starts with most of the season already on it (or, for snow, falling)
+    const { melts } = SEASONS[season];
+    while (drifts.length < plenty() * (melts ? 1 : 0.7)) blowIn(melts);
   }
 }
 
@@ -627,7 +659,7 @@ function ripple(x, y, strength, t) {
   if (still.matches) return;
   const big = strength > 0.7;
   ripples.push({ x, y, t, strength, rings: big ? 3 : 1, speed: big ? 110 : 60, life: big ? 3 : 1.5 });
-  if (ripples.length > 16) ripples.shift();
+  if (ripples.length > 24) ripples.shift();
 }
 
 // whether a point is near a ripple's rings, given how far it is from where the ripple started
@@ -663,6 +695,108 @@ function clearAt(px, py, skip) {
     if (ox < SOFT && oy < SOFT) k *= Math.min(1, Math.hypot(ox, oy) / SOFT);
   }
   return k;
+}
+
+// ---------- the season ----------
+
+// The season where the visitor is, by the month, turned around south of the equator (where the
+// browser can tell: summer time falls in January there), or the one asked for in the address
+function seasonNow() {
+  const asked = new URLSearchParams(location.search).get('season');
+  if (Object.keys(SEASONS).includes(asked)) return asked;
+  const now = new Date();
+  const year = now.getFullYear();
+  const south = new Date(year, 0, 1).getTimezoneOffset() < new Date(year, 6, 1).getTimezoneOffset();
+  const month = (now.getMonth() + (south ? 6 : 0)) % 12;
+  return ['winter', 'spring', 'summer', 'autumn'][Math.floor(((month + 1) % 12) / 3)];
+}
+
+// how many of the season to have at a time, for the size of the screen
+const plenty = () => Math.round(SEASONS[season].count * Math.min(Math.max((W * H) / 1.3e6, 0.4), 1.3));
+
+// A gust's worth somewhere over the pond, in the air or already on the water: a little flurry of
+// petals or leaves, which land together and spread apart, or a single flake of snow
+function blowIn(aloft) {
+  const { glyphs, melts } = SEASONS[season];
+  const [x, y] = [Math.random() * W, Math.random() * H];
+  for (let n = melts ? 1 : 2 + Math.floor(Math.random() * 4); n > 0; n--) {
+    drifts.push({
+      x: x + (Math.random() - 0.5) * 50,
+      y: y + (Math.random() - 0.5) * 30,
+      vx: 0,
+      vy: 0,
+      angle: Math.random() * 7,
+      spin: (Math.random() - 0.5) * 0.6, // radians a second, afloat; faster in the air
+      glyph: glyphs ? glyphs.charCodeAt(Math.floor(Math.random() * glyphs.length)) : 0,
+      color: Math.floor(Math.random() * THEMES.dark[season].length),
+      aloft: aloft ? 1.5 + Math.random() * 3 : 0, // seconds until it lands
+      life: 40 + Math.random() * 60, // seconds it floats, before it sinks
+      seed: Math.random() * 100,
+    });
+  }
+}
+
+// The season's step: more blow in while there's room; in the air they're carried on the wind and
+// land with a small ripple (snow melts there); on the water a slow current carries them, ripples
+// push them out of their way, and koi nudge them aside passing under
+function blow(t, dt) {
+  const { melts } = SEASONS[season];
+  const count = plenty();
+  gusts = Math.min(gusts + dt * (melts ? count / 5 : count / 200), 1);
+  if (gusts >= 1 && drifts.length < count) {
+    gusts = 0;
+    blowIn(true);
+  }
+  for (let i = drifts.length - 1; i >= 0; i--) {
+    const d = drifts[i];
+    if (d.aloft > 0) {
+      d.x += (WIND[0] + noise(t * 0.3, d.seed) * 14) * dt;
+      d.y += (WIND[1] + noise(d.seed, t * 0.3) * 14) * dt;
+      d.angle += d.spin * 6 * dt;
+      d.aloft -= dt;
+      if (d.aloft > 0) continue;
+      if (!melts || Math.random() < 0.1) ripple(d.x, d.y, 0.3, t);
+      if (melts) drifts.splice(i, 1);
+      continue;
+    }
+    bend(d.x, d.y, t);
+    d.vx += bendX * 4 * dt;
+    d.vy += bendY * 4 * dt;
+    for (const f of koi) {
+      const dx = d.x - f.x;
+      const dy = d.y - f.y;
+      const r = Math.hypot(dx, dy);
+      if (r > 0 && r < 26) {
+        d.vx += (dx / r) * 40 * dt;
+        d.vy += (dy / r) * 40 * dt;
+      }
+    }
+    // the current: a slow, wandering flow that everything afloat settles back into
+    const k = Math.min(1, dt * 0.8);
+    d.vx += (noise(d.x * 0.002, t * 0.03) * 6 - d.vx) * k;
+    d.vy += (noise(t * 0.03, d.y * 0.002) * 6 - d.vy) * k;
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    d.angle += d.spin * dt;
+    d.life -= dt;
+    if (d.life < 0 || d.x < -20 || d.x > W + 20 || d.y < -20 || d.y > H + 20) drifts.splice(i, 1);
+  }
+}
+
+// draws what's on the water (aloft false) or still in the air (true)
+function settle(aloft) {
+  for (const d of drifts) {
+    if (d.aloft > 0 !== aloft) continue;
+    const dx = Math.cos(d.angle);
+    const dy = Math.sin(d.angle);
+    for (const end of d.glyph ? [0] : [-5, 5]) {
+      const c = Math.floor((d.x + dx * end) / cw);
+      const r = Math.floor((d.y + dy * end) / ch);
+      if (c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
+      chars[r * cols + c] = d.glyph || strokeChar(dx, dy);
+      looks[r * cols + c] = DRIFT + d.color;
+    }
+  }
 }
 
 // ---------- reflections ----------
@@ -774,6 +908,7 @@ function step(t, dt) {
     p.angle += noise(t * 0.03, p.seed + 5) * 0.05 * dt;
   }
   for (const f of koi) swim(f, t, dt);
+  blow(t, dt);
 }
 
 // where a cell lies, for a look
@@ -900,6 +1035,8 @@ function draw(t) {
     stamp(p.fx - fm, p.fy - fm, p.fx + fm, p.fy + fm, (x, y) => flowerDist(p, x, y), flowerLook);
   }
 
+  // the season on the water, floating over koi and pads alike
+  settle(false);
   for (const p of food) {
     const c = Math.floor(p.x / cw);
     const r = Math.floor(p.y / ch);
@@ -907,6 +1044,7 @@ function draw(t) {
     chars[r * cols + c] = 111; // o
     looks[r * cols + c] = FOOD;
   }
+  settle(true);
 
   ctx.clearRect(0, 0, W, H);
   paint(0, LEAF);
@@ -927,19 +1065,19 @@ function draw(t) {
 // character in its cell
 function paint(from, to) {
   for (let r = 0; r < rows; r++) {
-    let used = 0;
+    seen.fill(0);
     for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       const s = looks[i];
       if (chars[i] === 32 || s < from || s >= to) continue;
-      if (!(used & (1 << (s - from)))) {
+      if (!seen[s]) {
         rowOf[s].fill(32);
-        used |= 1 << (s - from);
+        seen[s] = 1;
       }
       rowOf[s][c] = chars[i];
     }
     for (let s = from; s < to; s++) {
-      if (!(used & (1 << (s - from)))) continue;
+      if (!seen[s]) continue;
       ctx.fillStyle = styles[s][0];
       ctx.globalAlpha = styles[s][1];
       ctx.fillText(String.fromCharCode.apply(null, rowOf[s]), 0, r * ch + lift);
