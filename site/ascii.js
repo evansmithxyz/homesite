@@ -9,9 +9,14 @@
 // spring, willow leaves in summer, maple leaves in autumn and snow in winter (or the one asked for,
 // as in ?season=spring). By the visitor's clock, dawn and dusk tint the water warmer, and night
 // brings the moon's reflection, in its phase, and fireflies (?time=night); now and then a shower of
-// rain passes (?weather=rain). Resting the pointer on a koi names its variety, and a frog on a lily
-// pad leaps into the water when a click lands near it. The name in the heading unscrambles itself
-// on load. With reduced motion, the pond holds still and the name just shows.
+// rain passes (?weather=rain). Resting the pointer on a koi names its variety; holding it still a
+// moment over open water brings the nearest koi up to it. Koi breathe out bubbles, a dragonfly darts
+// about and rests on the pads, and about one visit in 30 a golden koi swims among the rest
+// (?koi=golden). Holidays bring their own: a jack-o'-lantern on a pad the week up to Halloween,
+// paper lanterns floating across at Obon, the koi in a red and white procession at New Year
+// (?holiday=halloween, obon or newyear). A page can ask for a quieter pond, with fewer koi and pads,
+// on its canvas: data-koi="1" data-lilies="1". The name in the heading unscrambles itself on load.
+// With reduced motion, the pond holds still and the name just shows.
 
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
@@ -35,12 +40,19 @@ const THEMES = {
     leaf: ['#84d272', 0.85], // a lily pad's outline
     lotus: ['#ff9ec4', 0.95],
     food: ['#e6b07a', 0.95],
-    frog: ['#9be37a', 0.95],
     moon: ['#fff3c4', 0.85], // its reflection
     glow: '#e8ff7a', // a firefly's
     glowAlpha: [0.95, 0.4], // lit, and fading
     label: ['#c9cfda', 0.85], // a koi's name
-    koi: ['#ff6a3d', '#f4efe6', '#6b7488', '#ffc247', '#8fb0dd'], // red, white, black, gold, blue
+    bubble: ['#d6e6ff', 0.75],
+    dragonfly: ['#4fd1e6', 0.95], // its body,
+    wing: ['#bfe9f2', 0.55], // and its wings
+    sparkle: ['#fff1a6', 0.95], // the golden koi's glitter
+    pumpkin: ['#ff8a2a', 0.95],
+    candle: '#ffe066', // the light in a jack-o'-lantern or a paper lantern,
+    candleAlpha: [1, 0.6], // flickering
+    lantern: ['#f1e4c8', 0.85], // a paper lantern
+    koi: ['#ff6a3d', '#f4efe6', '#6b7488', '#ffc247', '#8fb0dd', '#fff6c2'], // red, white, black, gold, blue, shine
     // what each season blows onto the water
     spring: [['#ffc6da', 0.9], ['#ff9ec4', 0.85]],
     summer: [['#a8db6e', 0.9], ['#d2e27a', 0.8]],
@@ -62,12 +74,19 @@ const THEMES = {
     leaf: ['#2f7d32', 0.8],
     lotus: ['#d6457f', 0.9],
     food: ['#8a5a2b', 0.9],
-    frog: ['#2f7d32', 0.95],
     moon: ['#a37f00', 0.7],
     glow: '#6b8e00',
     glowAlpha: [0.9, 0.35],
     label: ['#566072', 0.9],
-    koi: ['#e04a1f', '#9c9384', '#1f2633', '#d9a011', '#4f76ad'],
+    bubble: ['#5b7fb3', 0.6],
+    dragonfly: ['#0e7490', 0.95],
+    wing: ['#5aa5b5', 0.55],
+    sparkle: ['#b8860b', 0.9],
+    pumpkin: ['#e8650a', 0.95],
+    candle: '#c98a00',
+    candleAlpha: [1, 0.6],
+    lantern: ['#9c8a66', 0.85],
+    koi: ['#e04a1f', '#9c9384', '#1f2633', '#d9a011', '#4f76ad', '#a86f00'],
     spring: [['#e0679a', 0.85], ['#d6457f', 0.75]],
     summer: [['#4c9a48', 0.8], ['#7a9a2a', 0.8]],
     autumn: [['#d9480f', 0.9], ['#e8790f', 0.9], ['#c99a06', 0.9]],
@@ -80,14 +99,20 @@ const MIRROR = 4; // + 0, 1 or 2, from the waterline down
 const LEAF = 7;
 const LOTUS = 8;
 const FOOD = 9;
-const FROG = 10;
-const MOON = 11;
-const GLOW = 12; // + 0 lit, or 1 fading
-const LABEL = 14;
-const KOI = 15; // + color * DEPTHS.length + depth
-const [RED, WHITE, BLACK, GOLD, BLUE] = [0, 1, 2, 3, 4];
+const MOON = 10;
+const GLOW = 11; // + 0 lit, or 1 fading
+const LABEL = 13;
+const BUBBLE = 14;
+const DRAGONFLY = 15;
+const WING = 16;
+const SPARKLE = 17;
+const PUMPKIN = 18;
+const CANDLE = 19; // + 0 bright, or 1 dim
+const LANTERN = 21;
+const KOI = 22; // + color * DEPTHS.length + depth
+const [RED, WHITE, BLACK, GOLD, BLUE, SHINE] = [0, 1, 2, 3, 4, 5];
 const DEPTHS = [0.95, 0.66, 0.42, 0.24]; // a koi's opacity, from at the surface to deep down
-const DRIFT = KOI + 5 * DEPTHS.length; // + the season's color
+const DRIFT = KOI + THEMES.dark.koi.length * DEPTHS.length; // + the season's color
 
 // Where a koi's colors fall: u runs along it (0 at the nose, 1 at the tail), v across it (-1..1)
 const VARIETIES = {
@@ -115,6 +140,8 @@ const VARIETIES = {
   ogon: { fins: GOLD, at: () => GOLD },
   // a blue-gray back over red sides
   asagi: { fins: RED, at: (u, v) => (Math.abs(v) > 0.6 || u > 0.9 ? RED : BLUE) },
+  // gold, with light running along it in waves: rarely seen, about one visit in 30 (or ?koi=golden)
+  golden: { fins: GOLD, at: (u, v) => (Math.sin(u * 14 + v - drawnAt * 5) > 0.5 ? SHINE : GOLD) },
 };
 const SCHOOL = ['kohaku', 'ogon', 'tancho', 'showa', 'sanke', 'asagi', 'kohaku', 'ogon', 'sanke'];
 
@@ -151,6 +178,7 @@ const dark = matchMedia('(prefers-color-scheme: dark)');
 const asked = new URLSearchParams(location.search); // a season, time or weather to show instead
 const south = southern();
 const season = seasonNow();
+const holiday = holidayNow();
 
 // ---------- 2D simplex noise, after Stefan Gustavson's public-domain version ----------
 
@@ -265,10 +293,13 @@ const ripples = [];
 const food = [];
 const drifts = []; // what the season blew in
 let gusts = 0; // how many more are due to blow in
-const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0, touch: false, free: false };
+const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0, touch: false, free: false, movedAt: 0 };
 const clearings = [...document.querySelectorAll('[data-clear]')];
 let boxes = [];
 let lure = null; // a data-lure element being hovered or focused: { el, box, koi it draws }
+let hand = null; // the pointer held still over open water: { x, y, koi it draws, when they next gulp }
+const lures = [...document.querySelectorAll('[data-lure]')];
+let drawnAt = 0; // the time the frame being drawn shows, in seconds
 
 function setTheme() {
   theme = dark.matches ? THEMES.dark : THEMES.light;
@@ -279,10 +310,16 @@ function setTheme() {
     theme.leaf,
     theme.lotus,
     theme.food,
-    theme.frog,
     theme.moon,
     ...theme.glowAlpha.map((a) => [theme.glow, a]),
     theme.label,
+    theme.bubble,
+    theme.dragonfly,
+    theme.wing,
+    theme.sparkle,
+    theme.pumpkin,
+    ...theme.candleAlpha.map((a) => [theme.candle, a]),
+    theme.lantern,
   ];
   for (const color of theme.koi) for (const a of DEPTHS) styles.push([color, a]);
   styles.push(...theme[season]);
@@ -316,14 +353,23 @@ function resize() {
 
   const r = Math.min(Math.max(Math.min(W, H) * 0.055, 24), 58);
   lilies.length = 0;
-  for (const [fx, fy, scale, flower] of LILIES) {
+  // a page can ask for a quieter pond: <canvas data-koi="1" data-lilies="1">
+  for (const [fx, fy, scale, flower] of LILIES.slice(0, canvas.dataset.lilies ?? LILIES.length)) {
     const [x, y] = [fx * W, fy * H];
     lilies.push({ ax: x, ay: y, x, y, r: r * scale, angle: Math.random() * 7, flower, seed: Math.random() * 100 });
   }
   if (!koi.length) {
     boxes = clearings.map(textBox);
-    const count = Math.min(Math.max(Math.round((W * H) / 200000), 3), 9);
-    for (let i = 0; i < count; i++) koi.push(makeKoi(SCHOOL[i % SCHOOL.length]));
+    const count = +(canvas.dataset.koi ?? Math.min(Math.max(Math.round((W * H) / 200000), 3), 9));
+    // at New Year, red and white, the colors of celebration
+    const school = holiday === 'newyear' ? ['kohaku', 'tancho'] : SCHOOL;
+    for (let i = 0; i < count; i++) koi.push(makeKoi(school[i % school.length]));
+    if (asked.get('koi') === 'golden' || Math.random() < 1 / 30) koi.push(makeKoi('golden'));
+    [fly.x, fly.y] = openSpot();
+    [fly.ax, fly.ay] = [fly.x, fly.y];
+    for (let i = 0; holiday === 'obon' && i < 8 * roomy(); i++) {
+      lanterns.push({ x: Math.random() * W, y: H * (0.15 + Math.random() * 0.75), seed: Math.random() * 99 });
+    }
     // the pond starts with most of the season already on it (or, for snow, falling)
     const { melts } = SEASONS[season];
     while (drifts.length < plenty() * (melts ? 1 : 0.7)) blowIn(melts);
@@ -332,7 +378,7 @@ function resize() {
       flies.push({ x, y, rate: 0.6 + Math.random() * 0.8, seed: Math.random() * 99 }); // rate: of blinking
     }
   }
-  if (!frog.leap && !frog.back) frog.on = perch(true);
+  pumpkin = holiday === 'halloween' ? padFor(true) : null; // the pads are new
 }
 
 // the text itself, not its whole block, so a short heading doesn't clear the full width
@@ -340,6 +386,28 @@ function textBox(el) {
   const range = document.createRange();
   range.selectNodeContents(el);
   return range.getBoundingClientRect();
+}
+
+// draws one character at a point, unless that's off the screen or in a data-clear element's space
+function put(x, y, code, style) {
+  const c = Math.floor(x / cw);
+  const r = Math.floor(y / ch);
+  if (c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) return;
+  chars[r * cols + c] = code;
+  looks[r * cols + c] = style;
+}
+
+// draws a little picture centered on a point: rows of characters, each in the style that the letter
+// in the same place in `paint` stands for in `inks` (a space leaves the water showing)
+function sketch(x, y, art, paint, inks) {
+  const r0 = Math.round(y / ch - art.length / 2);
+  const c0 = Math.round(x / cw - art[0].length / 2);
+  art.forEach((line, dr) => {
+    for (let dc = 0; dc < line.length; dc++) {
+      if (line[dc] === ' ') continue;
+      put((c0 + dc + 0.5) * cw, (r0 + dr + 0.5) * ch, line.charCodeAt(dc), inks[paint[dr][dc]]);
+    }
+  });
 }
 
 // ---------- koi ----------
@@ -367,6 +435,8 @@ function makeKoi(kind) {
     depth: Math.random() * 0.6,
     fright: 0,
     full: 0, // until when it's still swallowing its last bite
+    breath: Math.random() * 12, // when it next breathes out bubbles
+    glint: 0, // when it next leaves glitter, if it's golden
     trail: new Float32Array((SEGS + 1) * 2), // the spine, following the head
     pts: new Float32Array((SEGS + 1) * 2), // and as drawn, swaying
     inv: new Float32Array(SEGS), // 1 / each drawn segment's length
@@ -416,9 +486,28 @@ function setLure(el) {
   lure = { el, box, koi: new Set(nearest.slice(0, Math.min(5, Math.ceil(koi.length * 0.6)))) };
 }
 
+// The pointer held still over open water a moment: the nearest few koi come up to it and gulp at
+// the surface there, as at a hand trailed in a pond
+function hold(t) {
+  if (!pointer.on || !pointer.free || pointer.touch || t - pointer.movedAt < 1.2) {
+    hand = null;
+    return;
+  }
+  if (!hand) {
+    const away = (f) => Math.hypot(f.x - pointer.x, f.y - pointer.y);
+    const near = koi.filter((f) => away(f) < 450).sort((a, b) => away(a) - away(b));
+    hand = { x: pointer.x, y: pointer.y, koi: new Set(near.slice(0, 4)), gulp: t + 1 };
+  } else if (t > hand.gulp) {
+    hand.gulp = t + 0.8 + Math.random() * 1.2;
+    if (koi.some((f) => hand.koi.has(f) && Math.hypot(f.x - hand.x, f.y - hand.y) < 50)) {
+      ripple(hand.x + (Math.random() - 0.5) * 24, hand.y + (Math.random() - 0.5) * 16, 0.3, t);
+    }
+  }
+}
+
 // One koi's steering for a step: a slow wander, kept to the pond and out from under the heading,
-// room for the others, a dash for food it can see, over to a lure that draws it, and away from a
-// pointer that sweeps past
+// room for the others, a dash for food it can see, over to a lure or a hand that draws it, after
+// the koi ahead of it at New Year, and away from a pointer that sweeps past
 function swim(f, t, dt) {
   const hx = f.x;
   const hy = f.y;
@@ -467,24 +556,30 @@ function swim(f, t, dt) {
     }
   }
 
-  // drawn to a lure, it comes to the water just off the lure's edge, then idles there nosing up to it,
-  // as koi gather where someone stands at a pond
+  // Drawn to a lure, it comes to the water just off the lure's edge, then idles there nosing up to it,
+  // as koi gather where someone stands at a pond. Drawn to a hand held still over the water, it comes
+  // to nose at the hand.
   let drawn = false;
   let idle = false;
-  if (lure && !meal && lure.koi.has(f)) {
-    const [x, y] = shore(lure.box, hx, hy, 30);
-    const d = Math.hypot(x - hx, y - hy);
-    idle = d < 45;
+  const to = meal ? null : hand?.koi.has(f) ? hand : lure?.koi.has(f) ? lure : null;
+  if (to) {
+    const [x, y] = to.box ? shore(to.box, hx, hy, 30) : [to.x, to.y];
+    idle = Math.hypot(x - hx, y - hy) < 45;
     drawn = !idle;
-    if (drawn) {
-      fx += ((x - hx) / d) * 2.2;
-      fy += ((y - hy) / d) * 2.2;
-    } else {
-      const [ex, ey] = shore(lure.box, hx, hy, 0);
-      const de = Math.hypot(ex - hx, ey - hy) || 1;
-      fx += ((ex - hx) / de) * 1.2;
-      fy += ((ey - hy) / de) * 1.2;
-    }
+    const [ex, ey] = idle && to.box ? shore(to.box, hx, hy, 0) : [x, y];
+    const d = Math.hypot(ex - hx, ey - hy) || 1;
+    fx += ((ex - hx) / d) * (drawn ? 2.2 : 1.2);
+    fy += ((ey - hy) / d) * (drawn ? 2.2 : 1.2);
+  }
+
+  // at New Year, the koi swim in procession, each following the tail of the one ahead
+  const ahead = holiday === 'newyear' && !meal && !to ? koi[koi.indexOf(f) - 1] : null;
+  if (ahead) {
+    const [x, y] = [ahead.trail[2 * SEGS], ahead.trail[2 * SEGS + 1]];
+    const d = Math.hypot(x - hx, y - hy) || 1;
+    fx += ((x - hx) / d) * 2;
+    fy += ((y - hy) / d) * 2;
+    drawn = d > f.len * 0.6; // and hurries to keep up
   }
 
   for (const b of boxes) {
@@ -761,6 +856,17 @@ function seasonNow() {
   return ['winter', 'spring', 'summer', 'autumn'][Math.floor(((month + 1) % 12) / 3)];
 }
 
+// The holiday, if it's one (or as asked, as in ?holiday=halloween): the week up to Halloween, Obon
+// (the summer festival when lanterns are floated on the water), and the first days of the year
+function holidayNow() {
+  if (['halloween', 'obon', 'newyear'].includes(asked.get('holiday'))) return asked.get('holiday');
+  const now = new Date();
+  const [month, day] = [now.getMonth() + 1, now.getDate()];
+  if (month === 10 && day >= 25) return 'halloween';
+  if (month === 8 && day >= 13 && day <= 16) return 'obon';
+  return month === 1 && day <= 3 ? 'newyear' : null;
+}
+
 // how much to scale things by for the size of the screen, against about 1440×900
 const roomy = () => Math.min(Math.max((W * H) / 1.3e6, 0.4), 1.3);
 // how many of the season to have at a time
@@ -842,11 +948,7 @@ function settle(aloft) {
     const dx = Math.cos(d.angle);
     const dy = Math.sin(d.angle);
     for (const end of d.glyph ? [0] : [-5, 5]) {
-      const c = Math.floor((d.x + dx * end) / cw);
-      const r = Math.floor((d.y + dy * end) / ch);
-      if (c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
-      chars[r * cols + c] = d.glyph || strokeChar(dx, dy);
-      looks[r * cols + c] = DRIFT + d.color;
+      put(d.x + dx * end, d.y + dy * end, d.glyph || strokeChar(dx, dy), DRIFT + d.color);
     }
   }
 }
@@ -913,10 +1015,8 @@ function drawFlies(t) {
   if (time !== 'night' || season === 'autumn' || season === 'winter') return;
   for (const f of flies) {
     const glow = Math.sin(t * f.rate + f.seed);
-    const [c, r] = [Math.floor(f.x / cw), Math.floor(f.y / ch)];
-    if (glow < 0.3 || c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
-    chars[r * cols + c] = glow > 0.75 ? 42 : 46; // * .
-    looks[r * cols + c] = GLOW + (glow > 0.75 ? 0 : 1);
+    if (glow > 0.75) put(f.x, f.y, 42, GLOW); // *
+    else if (glow > 0.3) put(f.x, f.y, 46, GLOW + 1); // .
   }
 }
 
@@ -935,80 +1035,10 @@ function rainfall(t, dt) {
   for (drops += dt * rain * 10 * roomy(); drops >= 1; drops--) ripple(Math.random() * W, Math.random() * H, 0.4, t);
 }
 
-// ---------- the frog ----------
-// A frog sits on a lily pad. A click near it sends it leaping into the water with a splash, and a
-// while later it climbs back out onto a pad.
-
-const FROG_ART = [' @..@ ', '(----)'];
-const CROAK_ART = [' @..@ ', '(-()-)'];
-const LEAP = 0.55; // seconds in the air
-const frog = { on: null, leap: null, back: 0 }; // its pad; its leap, while in the air; when it's back
-
-// a pad for the frog, whole on the screen and without a flower: the biggest, or any
-function perch(biggest) {
-  const open = lilies.filter((p) => !p.flower && p.x > p.r && p.x < W - p.r && p.y > p.r && p.y < H - p.r);
-  if (!open.length) return null;
-  return biggest ? open.reduce((a, b) => (b.r > a.r ? b : a)) : open[Math.floor(Math.random() * open.length)];
-}
-
-// where the frog sits on its pad: just off the middle, away from the notch
-function frogAt() {
-  const p = frog.on;
-  return [p.x - Math.cos(p.angle) * p.r * 0.1, p.y - Math.sin(p.angle) * p.r * 0.1];
-}
-
-function hop(t) {
-  if (frog.leap && t - frog.leap.t > LEAP) {
-    ripple(frog.leap.x1, frog.leap.y1, 0.8, t); // plop
-    frog.leap = null;
-    frog.back = t + 8 + Math.random() * 10;
-  } else if (frog.back && t > frog.back) {
-    frog.on = perch(false);
-    frog.back = 0;
-    if (frog.on) ripple(frog.on.x + frog.on.r, frog.on.y, 0.35, t); // climbing out
-  }
-}
-
-// sends the frog leaping away from a click near it
-function spook(x, y, t) {
-  if (!frog.on) return;
-  const [fx, fy] = frogAt();
-  const d = Math.hypot(fx - x, fy - y);
-  if (d > 110) return;
-  const a = d > 1 ? Math.atan2(fy - y, fx - x) : Math.random() * 2 * Math.PI;
-  const reach = frog.on.r + 70;
-  const [x1, y1] = [fx + Math.cos(a) * reach, fy + Math.sin(a) * reach * 0.8];
-  // into water it can be seen landing in
-  frog.leap = { t, x0: fx, y0: fy, x1: Math.min(Math.max(x1, 40), W - 40), y1: Math.min(Math.max(y1, 40), H - 40) };
-  frog.on = null;
-}
-
-// the frog sitting (aloft false), now and then puffing its throat to croak, or leaping (true)
-function drawFrog(t, aloft) {
-  let x;
-  let y;
-  if (aloft && frog.leap) {
-    const k = Math.min(1, (t - frog.leap.t) / LEAP);
-    x = frog.leap.x0 + (frog.leap.x1 - frog.leap.x0) * k;
-    y = frog.leap.y0 + (frog.leap.y1 - frog.leap.y0) * k - Math.sin(Math.PI * k) * 30;
-  } else if (!aloft && frog.on) [x, y] = frogAt();
-  else return;
-  const art = !aloft && noise(t * 0.5, 7) > 0.55 ? CROAK_ART : FROG_ART;
-  const r0 = Math.round(y / ch) - 1;
-  const c0 = Math.round(x / cw - art[0].length / 2);
-  art.forEach((line, dr) => {
-    for (let dc = 0; dc < line.length; dc++) {
-      const [r, c] = [r0 + dr, c0 + dc];
-      if (line[dc] === ' ' || c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
-      chars[r * cols + c] = line.charCodeAt(dc);
-      looks[r * cols + c] = FROG;
-    }
-  });
-}
-
 // ---------- koi names ----------
 
 const NAMES = {
+  golden: 'golden: rarely seen, and lucky',
   kohaku: 'kohaku: red on white',
   sanke: 'sanke: red and black on white',
   showa: 'showa: red and white on black',
@@ -1048,6 +1078,150 @@ function drawName(t) {
     chars[i] = text.charCodeAt(k);
     looks[i] = LABEL;
   }
+}
+
+// ---------- bubbles, and the golden koi's glitter ----------
+
+const BUBBLE_LIFE = 1.4; // seconds from a bubble showing to its bursting
+const bubbles = []; // each on its way up from a koi: where, and when it shows
+const glitter = []; // sparkles the golden koi leaves behind it: where, and when
+
+// Now and then a koi breathes out a few bubbles, which rise one after another and burst at the
+// surface in a small ring. The golden koi leaves a trail of glitter.
+function breathe(f, t) {
+  if (t > f.breath) {
+    f.breath = t + 6 + Math.random() * 14;
+    for (let n = 1 + Math.floor(Math.random() * 3); n > 0; n--) {
+      bubbles.push({ x: f.x + (Math.random() - 0.5) * 8, y: f.y + (Math.random() - 0.5) * 8, t: t + n * 0.35 });
+    }
+  }
+  if (f.kind === 'golden' && t > f.glint) {
+    f.glint = t + 0.12;
+    glitter.push({ x: f.tail[0] + (Math.random() - 0.5) * 14, y: f.tail[1] + (Math.random() - 0.5) * 10, t });
+  }
+}
+
+function fizz(t) {
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    if (t - bubbles[i].t < BUBBLE_LIFE) continue;
+    ripple(bubbles[i].x, bubbles[i].y, 0.25, t);
+    bubbles.splice(i, 1);
+  }
+  while (glitter.length && t - glitter[0].t > 1.2) glitter.shift();
+}
+
+// a bubble grows as it rises: . o O; glitter flashes, then fades: * .
+function drawBubbles(t) {
+  for (const b of bubbles) {
+    const age = (t - b.t) / BUBBLE_LIFE;
+    if (age >= 0) put(b.x, b.y, age < 0.35 ? 46 : age < 0.75 ? 111 : 79, BUBBLE);
+  }
+  for (const g of glitter) put(g.x, g.y, t - g.t < 0.4 ? 42 : 46, SPARKLE);
+}
+
+// ---------- the dragonfly ----------
+// A dragonfly darts about over the water: it hovers, darts off somewhere else, and now and then rests
+// on a lily pad, or on the pointer held still. A sweep of the pointer, or a click, close by sends it
+// off.
+
+const DRAGONFLY_ART = [
+  ['\\\\ //', ' =o= ', '// \\\\', '  |  '], // its wings held out
+  ['-- --', ' =o= ', '-- --', '  |  '], // and a blur of them, in flight
+];
+const DRAGONFLY_PAINT = ['ww ww', ' bbb ', 'ww ww', '  b  '];
+// where it is; where it hovers; its dart, while it's darting; what it rests on; when it moves on
+const fly = { x: 0, y: 0, ax: 0, ay: 0, dart: null, perch: null, until: 2, seed: Math.random() * 99 };
+
+// somewhere over open water, clear of the page's cards and headings
+function openSpot() {
+  const taken = [...boxes, ...lures.map((el) => el.getBoundingClientRect())];
+  let x = W / 2;
+  let y = H / 2;
+  for (let tries = 0; tries < 12; tries++) {
+    [x, y] = [40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80)];
+    if (taken.every((b) => x < b.left - 30 || x > b.right + 30 || y < b.top - 30 || y > b.bottom + 30)) break;
+  }
+  return [x, y];
+}
+
+// a lily pad without a flower (or a jack-o'-lantern), whole on the screen: the biggest, or any
+function padFor(biggest) {
+  const fits = (p) => p.x > p.r && p.x < W - p.r && p.y > p.r && p.y < H - p.r;
+  const open = lilies.filter((p) => !p.flower && p !== pumpkin && fits(p));
+  if (!open.length) return null;
+  return biggest ? open.reduce((a, b) => (b.r > a.r ? b : a)) : open[Math.floor(Math.random() * open.length)];
+}
+
+function dartTo(x, y, t, perch) {
+  const dur = Math.min(Math.max(Math.hypot(x - fly.x, y - fly.y) / 400, 0.25), 1.2);
+  fly.dart = { x0: fly.x, y0: fly.y, x1: x, y1: y, t0: t, dur };
+  fly.perch = perch;
+}
+
+function buzz(t) {
+  if (fly.dart) {
+    const k = Math.min(1, (t - fly.dart.t0) / fly.dart.dur);
+    const e = k * k * (3 - 2 * k); // easing in and out
+    fly.x = fly.dart.x0 + (fly.dart.x1 - fly.dart.x0) * e;
+    fly.y = fly.dart.y0 + (fly.dart.y1 - fly.dart.y0) * e;
+    if (k < 1) return;
+    fly.dart = null;
+    [fly.ax, fly.ay] = [fly.x, fly.y];
+    fly.until = t + (fly.perch ? 3 + Math.random() * 4 : 0.8 + Math.random() * 1.8);
+    return;
+  }
+  const scared = pointer.on && pointer.speed > 300 && Math.hypot(pointer.x - fly.x, pointer.y - fly.y) < 130;
+  const onHand = fly.perch === 'hand';
+  if (scared || (onHand && !hand) || (t > fly.until && !onHand)) {
+    const pad = Math.random() < 0.35 ? padFor(false) : null;
+    if (hand && !scared && Math.random() < 0.5) dartTo(hand.x + 10, hand.y - 12, t, 'hand');
+    else if (pad && !scared) dartTo(pad.x, pad.y, t, pad);
+    else dartTo(...openSpot(), t, null);
+  } else if (onHand) [fly.x, fly.y] = [hand.x + 10, hand.y - 12];
+  else if (fly.perch) [fly.x, fly.y] = [fly.perch.x, fly.perch.y]; // as the pad drifts
+  else {
+    fly.x = fly.ax + noise(t * 1.5, fly.seed) * 5;
+    fly.y = fly.ay + noise(fly.seed, t * 1.5) * 4;
+  }
+}
+
+// its wings a blur while it flies, held still while it rests
+function drawFly(t) {
+  const resting = fly.perch && !fly.dart;
+  const art = DRAGONFLY_ART[!resting && Math.floor(t * 18) % 2 ? 1 : 0];
+  sketch(fly.x, fly.y, art, DRAGONFLY_PAINT, { w: WING, b: DRAGONFLY });
+}
+
+// ---------- holidays ----------
+
+// a jack-o'-lantern, sitting on a lily pad through the week up to Halloween
+const PUMPKIN_ART = ['    )    ', " .-'-'-. ", '( ^   ^ )', '(  vvv  )', " '-...-' "];
+const PUMPKIN_PAINT = ['    s    ', ' ppppppp ', 'p c   c p', 'p  ccc  p', ' ppppppp '];
+let pumpkin = null; // its pad
+// paper lanterns, floated across the water at Obon
+const LANTERN_ART = ['.-.', '|o|', "'-'"];
+const LANTERN_PAINT = ['lll', 'lcl', 'lll'];
+const lanterns = [];
+
+// the lanterns drift slowly across with the current, rocked by ripples, and come round again
+function float(t, dt) {
+  for (const l of lanterns) {
+    bend(l.x, l.y, t);
+    l.x += (7 + noise(t * 0.1, l.seed) * 4 + bendX * 0.6) * dt;
+    l.y += (noise(l.seed, t * 0.1) * 5 + bendY * 0.6) * dt;
+    if (l.x > W + 20) [l.x, l.y] = [-20, H * (0.15 + Math.random() * 0.75)];
+  }
+}
+
+// a candle's flicker
+const candle = (t, seed) => CANDLE + (noise(t * 8, seed) > 0.25 ? 1 : 0);
+
+function drawHoliday(t) {
+  if (pumpkin) {
+    const inks = { s: LEAF, p: PUMPKIN, c: candle(t, 3) };
+    sketch(pumpkin.x, pumpkin.y, PUMPKIN_ART, PUMPKIN_PAINT, inks);
+  }
+  for (const l of lanterns) sketch(l.x, l.y, LANTERN_ART, LANTERN_PAINT, { l: LANTERN, c: candle(t, l.seed) });
 }
 
 // ---------- reflections ----------
@@ -1163,10 +1337,16 @@ function step(t, dt) {
     clock = t + 30;
   }
   rainfall(t, dt);
-  for (const f of koi) swim(f, t, dt);
+  hold(t);
+  for (const f of koi) {
+    swim(f, t, dt);
+    breathe(f, t);
+  }
   blow(t, dt);
   flit(t, dt);
-  hop(t);
+  fizz(t);
+  buzz(t);
+  float(t, dt);
   if (pointer.on && pointer.free && !pointer.touch) notice(pointer.x, pointer.y, t);
 }
 
@@ -1221,6 +1401,7 @@ function stamp(x0, y0, x1, y1, dist, look) {
 let cleared = ''; // where the data-clear elements were when `clear` was last worked out
 
 function draw(t) {
+  drawnAt = t;
   boxes = clearings.map(textBox);
   const where = `${cols} ${rows} ${boxes.map((b) => `${b.left} ${b.top} ${b.right} ${b.bottom}`)}`;
   const moved = where !== cleared;
@@ -1300,22 +1481,17 @@ function draw(t) {
     const fm = p.r * 0.42 + ch;
     stamp(p.fx - fm, p.fy - fm, p.fx + fm, p.fy + fm, (x, y) => flowerDist(p, x, y), flowerLook);
   }
+  drawHoliday(t);
 
-  // the season on the water, floating over koi and pads alike, and the frog on its pad
+  // the season on the water, floating over koi and pads alike, bubbles bursting through it
   settle(false);
-  drawFrog(t, false);
-  for (const p of food) {
-    const c = Math.floor(p.x / cw);
-    const r = Math.floor(p.y / ch);
-    if (c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
-    chars[r * cols + c] = 111; // o
-    looks[r * cols + c] = FOOD;
-  }
+  drawBubbles(t);
+  for (const p of food) put(p.x, p.y, 111, FOOD); // o
   drawName(t);
   // and above it all, whatever's in the air
   settle(true);
   drawFlies(t);
-  drawFrog(t, true);
+  drawFly(t);
 
   ctx.clearRect(0, 0, W, H);
   paint(0, LEAF);
@@ -1398,6 +1574,7 @@ addEventListener('pointermove', (e) => {
       ripple(e.clientX, e.clientY, 0.45, t);
     }
   }
+  if (moved > 3) pointer.movedAt = t;
   pointer.x = e.clientX;
   pointer.y = e.clientY;
   pointer.t = t;
@@ -1410,7 +1587,7 @@ addEventListener('pointerdown', (e) => {
   const t = performance.now() / 1000;
   ripple(e.clientX, e.clientY, 1, t);
   if (still.matches) return;
-  spook(e.clientX, e.clientY, t);
+  if (Math.hypot(e.clientX - fly.x, e.clientY - fly.y) < 130 && !fly.dart) dartTo(...openSpot(), t, null);
   // a tap names a koi, as resting the pointer on one does
   if (!(e.target instanceof Element && e.target.closest('a, h1, h2'))) notice(e.clientX, e.clientY, t);
   // a few pellets of food, scattered where they land
@@ -1424,7 +1601,7 @@ addEventListener('pointerdown', (e) => {
 document.addEventListener('pointerout', (e) => {
   if (!e.relatedTarget) pointer.on = false;
 });
-for (const el of document.querySelectorAll('[data-lure]')) {
+for (const el of lures) {
   const off = () => {
     if (lure?.el === el) lure = null;
   };
