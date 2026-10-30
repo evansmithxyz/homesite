@@ -561,9 +561,11 @@ function swim(f, t, dt) {
   // to nose at the hand.
   let drawn = false;
   let idle = false;
+  let far = 0; // and the farther off it is, the more it hurries
   const to = meal ? null : hand?.koi.has(f) ? hand : lure?.koi.has(f) ? lure : null;
   if (to) {
     const [x, y] = to.box ? shore(to.box, hx, hy, 30) : [to.x, to.y];
+    far = Math.min(1, Math.hypot(x - hx, y - hy) / 500);
     idle = Math.hypot(x - hx, y - hy) < 45;
     drawn = !idle;
     const [ex, ey] = idle && to.box ? shore(to.box, hx, hy, 0) : [x, y];
@@ -609,7 +611,7 @@ function swim(f, t, dt) {
   const turn = (hurry ? 3.2 : drawn ? 2 : 1.3) * dt;
   const da = wrap(Math.atan2(fy, fx) - f.angle);
   f.angle += Math.max(-turn, Math.min(turn, da));
-  const target = f.cruise * (idle ? 0.35 : 1) * (1 + (meal ? 1.4 : drawn ? 0.5 : 0) + f.fright * 2.5);
+  const target = f.cruise * (idle ? 0.35 : 1) * (1 + (meal ? 1.4 : drawn ? 0.5 + far : 0) + f.fright * 2.5);
   f.speed += (target - f.speed) * Math.min(1, dt * 1.5);
   f.x += Math.cos(f.angle) * f.speed * dt;
   f.y += Math.sin(f.angle) * f.speed * dt;
@@ -1631,11 +1633,19 @@ function unscramble(el) {
   const text = el.textContent.trim();
   el.setAttribute('aria-label', text);
   el.textContent = '';
+  // the letters of each word go in a run that doesn't wrap, so a long heading breaks between words
+  let word = null;
   const letters = [...text].map((chr) => {
     const span = document.createElement('span');
     span.textContent = chr === ' ' ? ' ' : chr;
     span.setAttribute('aria-hidden', 'true');
-    el.append(span);
+    if (chr === ' ') word = null;
+    else if (!word) {
+      word = document.createElement('span');
+      word.style.whiteSpace = 'nowrap';
+      el.append(word);
+    }
+    (word || el).append(span);
     return span;
   });
   // each letter keeps its own width, so the stand-in glyphs don't shift the line

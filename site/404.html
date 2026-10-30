@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Not found · Evan Smith</title>
+    <meta name="robots" content="noindex" />
+    <!-- Caddy serves this page at whatever address wasn't found, so its own files are linked from the root -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script type="module" src="/ascii.js"></script>
+    <style>
+      :root {
+        --bg: #eef1f5;
+        --surface: #ffffff;
+        --line: #d8dee7;
+        --text: #1b2230;
+        --muted: #566072;
+        --focus: #2f62d8;
+        --shadow: 0 1px 2px rgba(20, 30, 50, 0.06), 0 12px 28px -18px rgba(20, 30, 50, 0.35);
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12151b;
+          --surface: #1a1e26;
+          --line: #2d3341;
+          --text: #e7eaf0;
+          --muted: #9ba4b4;
+          --focus: #7ea6ff;
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 32px -18px rgba(0, 0, 0, 0.8);
+          color-scheme: dark;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      /* the ASCII background (ascii.js), behind everything: here a quiet pond, one koi and one pad */
+      #ascii {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+        pointer-events: none;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: clamp(56px, 14vw, 120px) 16px 64px;
+      }
+      .status {
+        margin: 0 0 14px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        margin: 0 0 clamp(36px, 8vw, 64px);
+        font: 600 clamp(42px, 9vw, 72px) / 1.05 ui-serif, Georgia, 'Times New Roman', serif;
+        letter-spacing: -0.015em;
+      }
+      p {
+        max-width: 32em;
+        margin: 0 0 28px;
+        color: var(--muted);
+      }
+      /* frosted, like the homepage's cards; the koi come to it while it's hovered or focused */
+      .home {
+        display: inline-block;
+        padding: 10px 20px;
+        background: color-mix(in srgb, var(--surface) 78%, transparent);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: inherit;
+        font-weight: 600;
+        text-decoration: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      .home:hover {
+        border-color: var(--muted);
+        box-shadow: var(--shadow);
+      }
+      .home:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .home {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="ascii" aria-hidden="true" data-koi="1" data-lilies="1"></canvas>
+    <main>
+      <p class="status" data-clear>404 · Not found</p>
+      <h1 data-clear data-scramble data-reflect>This page swam away</h1>
+      <p data-clear>There's nothing at this address. It may have moved, or never been here at all.</p>
+      <a class="home" href="/" data-lure>Back to the pond <span aria-hidden="true">→</span></a>
+    </main>
+  </body>
+</html>
