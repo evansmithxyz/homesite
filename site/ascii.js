@@ -3,9 +3,10 @@
 // the koi it sweeps past; a click drops a few pellets of food, and the koi come to eat them. Shapes
 // are traced in characters: where an outline crosses a cell it picks one of ' - . _ ( ) / \ by the
 // outline's slope and where it crosses, so the koi, the pads and the ripples read as drawn lines.
-// It all keeps clear of elements marked data-clear, so the heading stays readable. The name in the
-// heading unscrambles itself on load. With reduced motion, the pond holds still and the name just
-// shows.
+// It all keeps clear of elements marked data-clear, so the heading stays readable. Elements marked
+// data-reflect are mirrored in the water under them, and ones marked data-lure draw koi to their
+// edge while hovered or focused. The name in the heading unscrambles itself on load. With reduced
+// motion, the pond holds still and the name just shows.
 
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
@@ -18,6 +19,8 @@ const THEMES = {
     waterAlpha: [0.13, 0.22, 0.34], // for each WATER character after the space
     tints: ['#4fb3a9', '#7db4ff', '#84d272'], // washes of color drifting over the water
     ring: ['#c3d7ff', 0.8],
+    mirror: '#e7eaf0', // a reflection, in the heading's color
+    mirrorAlpha: [0.4, 0.27, 0.15], // from the waterline down
     leaf: ['#84d272', 0.85], // a lily pad's outline
     lotus: ['#ff9ec4', 0.95],
     food: ['#e6b07a', 0.95],
@@ -28,6 +31,8 @@ const THEMES = {
     waterAlpha: [0.1, 0.17, 0.27],
     tints: ['#0f766e', '#1d64c2', '#2f7d32'],
     ring: ['#1d64c2', 0.6],
+    mirror: '#1b2230',
+    mirrorAlpha: [0.32, 0.21, 0.12],
     leaf: ['#2f7d32', 0.8],
     lotus: ['#d6457f', 0.9],
     food: ['#8a5a2b', 0.9],
@@ -36,10 +41,11 @@ const THEMES = {
 };
 // the styles, by number: the water's first (drawn before the washes of color), then the rest
 const RING = 3;
-const LEAF = 4;
-const LOTUS = 5;
-const FOOD = 6;
-const KOI = 7; // + color * DEPTHS.length + depth
+const MIRROR = 4; // + 0, 1 or 2, from the waterline down
+const LEAF = 7;
+const LOTUS = 8;
+const FOOD = 9;
+const KOI = 10; // + color * DEPTHS.length + depth
 const [RED, WHITE, BLACK, GOLD, BLUE] = [0, 1, 2, 3, 4];
 const DEPTHS = [0.95, 0.66, 0.42, 0.24]; // a koi's opacity, from at the surface to deep down
 
@@ -203,10 +209,18 @@ const food = [];
 const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0 };
 const clearings = [...document.querySelectorAll('[data-clear]')];
 let boxes = [];
+let lure = null; // a data-lure element being hovered or focused: { el, box, koi it draws }
 
 function setTheme() {
   theme = dark.matches ? THEMES.dark : THEMES.light;
-  styles = [...theme.waterAlpha.map((a) => [theme.water, a]), theme.ring, theme.leaf, theme.lotus, theme.food];
+  styles = [
+    ...theme.waterAlpha.map((a) => [theme.water, a]),
+    theme.ring,
+    ...theme.mirrorAlpha.map((a) => [theme.mirror, a]),
+    theme.leaf,
+    theme.lotus,
+    theme.food,
+  ];
   for (const color of theme.koi) for (const a of DEPTHS) styles.push([color, a]);
 }
 
@@ -306,8 +320,28 @@ function makeKoi(kind) {
   return f;
 }
 
+// the nearest point to (x, y) on the outline of box b grown by m px on every side
+function shore(b, x, y, m) {
+  const [l, r, t, u] = [b.left - m, b.right + m, b.top - m, b.bottom + m];
+  if (x < l || x > r || y < t || y > u) return [Math.min(Math.max(x, l), r), Math.min(Math.max(y, t), u)];
+  const near = Math.min(x - l, r - x, y - t, u - y);
+  return near === x - l ? [l, y] : near === r - x ? [r, y] : near === y - t ? [x, t] : [x, u];
+}
+
+// draws the nearest few koi to an element's edge, while the pointer is on it or it has focus
+function setLure(el) {
+  const box = el.getBoundingClientRect();
+  const away = (f) => {
+    const [x, y] = shore(box, f.x, f.y, 0);
+    return Math.hypot(x - f.x, y - f.y);
+  };
+  const nearest = [...koi].sort((a, b) => away(a) - away(b));
+  lure = { el, box, koi: new Set(nearest.slice(0, Math.min(5, Math.ceil(koi.length * 0.6)))) };
+}
+
 // One koi's steering for a step: a slow wander, kept to the pond and out from under the heading,
-// room for the others, a dash for food it can see, and away from a pointer that sweeps past
+// room for the others, a dash for food it can see, over to a lure that draws it, and away from a
+// pointer that sweeps past
 function swim(f, t, dt) {
   const hx = f.x;
   const hy = f.y;
@@ -356,6 +390,26 @@ function swim(f, t, dt) {
     }
   }
 
+  // drawn to a lure, it comes to the water just off the lure's edge, then idles there nosing up to it,
+  // as koi gather where someone stands at a pond
+  let drawn = false;
+  let idle = false;
+  if (lure && !meal && lure.koi.has(f)) {
+    const [x, y] = shore(lure.box, hx, hy, 30);
+    const d = Math.hypot(x - hx, y - hy);
+    idle = d < 45;
+    drawn = !idle;
+    if (drawn) {
+      fx += ((x - hx) / d) * 2.2;
+      fy += ((y - hy) / d) * 2.2;
+    } else {
+      const [ex, ey] = shore(lure.box, hx, hy, 0);
+      const de = Math.hypot(ex - hx, ey - hy) || 1;
+      fx += ((ex - hx) / de) * 1.2;
+      fy += ((ey - hy) / de) * 1.2;
+    }
+  }
+
   for (const b of boxes) {
     const dx = hx - Math.min(Math.max(hx, b.left), b.right);
     const dy = hy - Math.min(Math.max(hy, b.top), b.bottom);
@@ -380,10 +434,10 @@ function swim(f, t, dt) {
   f.fright = Math.max(0, f.fright - dt * 0.7);
 
   const hurry = meal || f.fright > 0.2;
-  const turn = (hurry ? 3.2 : 1.3) * dt;
+  const turn = (hurry ? 3.2 : drawn ? 2 : 1.3) * dt;
   const da = wrap(Math.atan2(fy, fx) - f.angle);
   f.angle += Math.max(-turn, Math.min(turn, da));
-  const target = f.cruise * (1 + (meal ? 1.4 : 0) + f.fright * 2.5);
+  const target = f.cruise * (idle ? 0.35 : 1) * (1 + (meal ? 1.4 : drawn ? 0.5 : 0) + f.fright * 2.5);
   f.speed += (target - f.speed) * Math.min(1, dt * 1.5);
   f.x += Math.cos(f.angle) * f.speed * dt;
   f.y += Math.sin(f.angle) * f.speed * dt;
@@ -576,6 +630,131 @@ function ripple(x, y, strength, t) {
   if (ripples.length > 16) ripples.shift();
 }
 
+// whether a point is near a ripple's rings, given how far it is from where the ripple started
+const touches = (rp, d, t) => Math.abs(d - (t - rp.t) * rp.speed + rp.rings * 11) < rp.rings * 11 + ch;
+
+// how far the swell of the ripples passing a point bends the light through it, in bendX and bendY
+let bendX = 0;
+let bendY = 0;
+function bend(px, py, t) {
+  bendX = 0;
+  bendY = 0;
+  for (const rp of ripples) {
+    const dx = px - rp.x;
+    const dy = py - rp.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (!touches(rp, d, t)) continue;
+    const off = d - (t - rp.t) * rp.speed;
+    const swell = rp.strength * (1 - (t - rp.t) / rp.life) * Math.exp(-(off * off) / 600) * 14;
+    bendX += (dx / d) * swell;
+    bendY += (dy / d) * swell;
+  }
+}
+
+// How much of the pond shows at a point: none right by a data-clear element, fading back in around
+// it. `skip` is an element whose own clear space doesn't count.
+function clearAt(px, py, skip) {
+  let k = 1;
+  for (let j = 0; j < boxes.length; j++) {
+    if (clearings[j] === skip) continue;
+    const b = boxes[j];
+    const ox = Math.max(b.left - PAD - px, 0, px - b.right - PAD);
+    const oy = Math.max(b.top - PAD - py, 0, py - b.bottom - PAD);
+    if (ox < SOFT && oy < SOFT) k *= Math.min(1, Math.hypot(ox, oy) / SOFT);
+  }
+  return k;
+}
+
+// ---------- reflections ----------
+// An element marked data-reflect shows in the water under its last line of text: its letters as
+// they stand (scrambled too, while the name unscrambles), mirrored at their baseline, each row
+// wavering sideways with the surface and bent by the ripples passing through.
+
+const SQUASH = 0.8; // how tall a reflection is, against its letters
+const SPILL = 8; // px a letter may overhang its element's box
+const mirrors = [...document.querySelectorAll('[data-reflect]')].map((el) => ({ el, key: '', mask: null }));
+const ink = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+
+// Traces the element's last line of letters into a mask of where their ink is (1) and isn't (0),
+// from SPILL px left of its box to SPILL right, and from the top of its letters to their baseline.
+// It's traced again only when the letters or the box change.
+function trace(m, box) {
+  const style = getComputedStyle(m.el);
+  const key = `${m.el.textContent} ${box.width} ${box.height} ${style.fontSize}`;
+  if (key === m.key) return;
+  m.key = key;
+  const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  ink.font = font;
+  // the font's height above the baseline (or, where a browser can't say, its size)
+  const ascent = Math.ceil(ink.measureText('M').fontBoundingBoxAscent ?? parseFloat(style.fontSize));
+  // each letter where it sits now: its text, and its left and baseline, from the box's top left
+  const letters = [];
+  const range = document.createRange();
+  const walk = document.createTreeWalker(m.el, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    for (let i = 0; i < node.length; i++) {
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const r = range.getBoundingClientRect();
+      letters.push([node.data[i], r.left - box.left, r.top - box.top + ascent]);
+    }
+  }
+  m.mask = null;
+  if (!letters.length) return;
+  m.base = Math.max(...letters.map((l) => l[2])); // the last line's baseline: the waterline
+  m.w = Math.ceil(box.width) + 2 * SPILL;
+  m.h = ascent;
+  ink.canvas.width = m.w; // (which resets the font)
+  ink.canvas.height = m.h;
+  ink.font = font;
+  for (const [text, x, y] of letters) if (m.base - y < 2) ink.fillText(text, x + SPILL, m.h);
+  const data = ink.getImageData(0, 0, m.w, m.h).data;
+  m.mask = new Uint8Array(m.w * m.h);
+  for (let i = 0; i < m.mask.length; i++) m.mask[i] = data[i * 4 + 3] > 100 ? 1 : 0;
+}
+
+// draws a reflection into the cells under the waterline, fainter the deeper it goes
+function reflect(m, box, t) {
+  trace(m, box);
+  if (!m.mask) return;
+  const left = box.left - SPILL;
+  const line = box.top + m.base;
+  const depth = m.h * SQUASH;
+  const r0 = Math.max(0, Math.round(line / ch));
+  const r1 = Math.min(rows - 1, Math.floor((line + depth) / ch));
+  const c0 = Math.max(0, Math.floor(left / cw));
+  const c1 = Math.min(cols - 1, Math.floor((left + m.w) / cw));
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const px = (c + 0.5) * cw;
+      const py = (r + 0.5) * ch;
+      const k = clearAt(px, py, m.el); // the heading's own clear space is where its reflection goes
+      if (k < 0.3) continue;
+      bend(px, py, t);
+      // each row sways as one, as the surface tilts under it
+      const sway = Math.sin(r * 1.7 - t * 2) * 2 + noise(r * 0.4, t * 0.4) * 4 + bendX;
+      // sampled at six points in the cell, in two columns of three
+      let lefts = 0;
+      let rights = 0;
+      for (let s = 0; s < 6; s++) {
+        const below = (ch * (2 * Math.floor(s / 2) + 1)) / 6 + r * ch - line;
+        const mx = Math.round(c * cw + cw * (s % 2 ? 0.75 : 0.25) + sway - left);
+        const my = Math.round(m.h - (below + bendY * 0.5) / SQUASH);
+        if (below < 0 || mx < 0 || mx >= m.w || my < 0 || my >= m.h || !m.mask[my * m.w + mx]) continue;
+        if (s % 2) rights++;
+        else lefts++;
+      }
+      if (lefts + rights === 0) continue;
+      // a letter's upright stroke shows as one, the rest as streaks on the water
+      const upright = Math.max(lefts, rights) >= 2 && Math.min(lefts, rights) === 0;
+      const code = upright ? 124 : lefts + rights > 3 ? 61 : lefts + rights > 1 ? 45 : 126; // | = - ~
+      const fade = (py - line) / depth;
+      chars[r * cols + c] = code;
+      looks[r * cols + c] = MIRROR + Math.min(2, (fade < 0.35 ? 0 : fade < 0.7 ? 1 : 2) + (k < 0.7 ? 1 : 0));
+    }
+  }
+}
+
 // ---------- drawing ----------
 
 function step(t, dt) {
@@ -588,6 +767,7 @@ function step(t, dt) {
     if (t - p.t > 40) food.splice(i, 1);
   }
   pointer.speed *= Math.exp(-dt * 8);
+  if (lure) lure.box = lure.el.getBoundingClientRect();
   for (const p of lilies) {
     p.x = p.ax + noise(t * 0.05, p.seed) * 6;
     p.y = p.ay + noise(p.seed, t * 0.05) * 6;
@@ -653,34 +833,23 @@ function draw(t) {
     for (let c = 0; c < cols; c++) {
       const px = (c + 0.5) * cw;
       const i = r * cols + c;
-      let k = 1;
-      for (const b of boxes) {
-        const ox = Math.max(b.left - PAD - px, 0, px - b.right - PAD);
-        const oy = Math.max(b.top - PAD - py, 0, py - b.bottom - PAD);
-        if (ox < SOFT && oy < SOFT) k *= Math.min(1, Math.hypot(ox, oy) / SOFT);
-      }
+      const k = clearAt(px, py, null);
       clear[i] = k;
       chars[i] = 32;
       if (k <= 0) continue;
 
-      // a ripple's rings, traced; between them, the swell bends the light through the surface
-      let sx = px;
-      let sy = py;
+      // a ripple's rings, traced
       let ring = 0;
       let fade = 0;
       for (const rp of ripples) {
-        const age = t - rp.t;
         const dx = px - rp.x;
         const dy = py - rp.y;
         const d = Math.hypot(dx, dy) || 1;
-        const radius = age * rp.speed;
-        if (d > radius + ch || d < radius - rp.rings * 22 - ch) continue;
-        const strength = rp.strength * (1 - age / rp.life) * k;
-        const off = d - radius;
-        sx += (dx / d) * strength * Math.exp(-(off * off) / 600) * 14;
-        sy += (dy / d) * strength * Math.exp(-(off * off) / 600) * 14;
+        if (!touches(rp, d, t)) continue;
+        const radius = (t - rp.t) * rp.speed;
+        const strength = rp.strength * (1 - (t - rp.t) / rp.life) * k;
         for (let n = 0; n < rp.rings; n++) {
-          const s = off + n * 22;
+          const s = d - radius + n * 22;
           if (radius - n * 22 > 4 && strength * (1 - n * 0.3) > fade && crosses(dx / d, dy / d, s)) {
             fade = strength * (1 - n * 0.3);
             ring = edgeChar(dx / d, dy / d, s);
@@ -692,13 +861,17 @@ function draw(t) {
         looks[i] = fade > 0.5 ? RING : fade > 0.25 ? 2 : 1; // a fading ring sinks into the water's styles
         continue;
       }
-      const w = Math.round(clamp01((surface(sx, sy, t) - 0.15) * 1.5 * k) * (WATER.length - 1));
+      // between them, the swell bends the light through the surface
+      bend(px, py, t);
+      const w = Math.round(clamp01((surface(px + bendX, py + bendY, t) - 0.15) * 1.5 * k) * (WATER.length - 1));
       if (w > 0) {
         chars[i] = WATER.charCodeAt(w);
         looks[i] = w - 1;
       }
     }
   }
+
+  for (const m of mirrors) reflect(m, textBox(m.el), t);
 
   // the koi, the deepest first, so those nearer the surface pass over them
   for (const f of [...koi].sort((a, b) => b.depth - a.depth)) {
@@ -827,6 +1000,15 @@ addEventListener('pointerdown', (e) => {
 document.addEventListener('pointerout', (e) => {
   if (!e.relatedTarget) pointer.on = false;
 });
+for (const el of document.querySelectorAll('[data-lure]')) {
+  const off = () => {
+    if (lure?.el === el) lure = null;
+  };
+  el.addEventListener('pointerenter', () => setLure(el));
+  el.addEventListener('focus', () => setLure(el));
+  el.addEventListener('pointerleave', off);
+  el.addEventListener('blur', off);
+}
 addEventListener('resize', () => {
   resize();
   if (still.matches) draw(0);
