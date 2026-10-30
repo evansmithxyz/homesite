@@ -1,0 +1,2 @@
+# Git Bash can't run a script with Windows line endings ($'\r': command not found)
+*.sh text eol=lf
