@@ -7,8 +7,11 @@
 // data-reflect are mirrored in the water under them, and ones marked data-lure draw koi to their
 // edge while hovered or focused. Each season blows something onto the water: cherry blossom in
 // spring, willow leaves in summer, maple leaves in autumn and snow in winter (or the one asked for,
-// as in ?season=spring). The name in the heading unscrambles itself on load. With reduced motion,
-// the pond holds still and the name just shows.
+// as in ?season=spring). By the visitor's clock, dawn and dusk tint the water warmer, and night
+// brings the moon's reflection, in its phase, and fireflies (?time=night); now and then a shower of
+// rain passes (?weather=rain). Resting the pointer on a koi names its variety, and a frog on a lily
+// pad leaps into the water when a click lands near it. The name in the heading unscrambles itself
+// on load. With reduced motion, the pond holds still and the name just shows.
 
 const FONT = "ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace";
 const WATER = ' .-~'; // the surface, from calm to catching the light
@@ -19,13 +22,24 @@ const THEMES = {
   dark: {
     water: '#86a4cc',
     waterAlpha: [0.13, 0.22, 0.34], // for each WATER character after the space
-    tints: ['#4fb3a9', '#7db4ff', '#84d272'], // washes of color drifting over the water
+    // washes of color drifting over the water, by the time of day
+    tints: {
+      dawn: ['#ffb3c7', '#ffd08a', '#9fd0ff'],
+      day: ['#4fb3a9', '#7db4ff', '#84d272'],
+      dusk: ['#ff9a76', '#c58cff', '#ffb35c'],
+      night: ['#3b5bab', '#6a5acd', '#2a7f8f'],
+    },
     ring: ['#c3d7ff', 0.8],
     mirror: '#e7eaf0', // a reflection, in the heading's color
     mirrorAlpha: [0.4, 0.27, 0.15], // from the waterline down
     leaf: ['#84d272', 0.85], // a lily pad's outline
     lotus: ['#ff9ec4', 0.95],
     food: ['#e6b07a', 0.95],
+    frog: ['#9be37a', 0.95],
+    moon: ['#fff3c4', 0.85], // its reflection
+    glow: '#e8ff7a', // a firefly's
+    glowAlpha: [0.95, 0.4], // lit, and fading
+    label: ['#c9cfda', 0.85], // a koi's name
     koi: ['#ff6a3d', '#f4efe6', '#6b7488', '#ffc247', '#8fb0dd'], // red, white, black, gold, blue
     // what each season blows onto the water
     spring: [['#ffc6da', 0.9], ['#ff9ec4', 0.85]],
@@ -36,13 +50,23 @@ const THEMES = {
   light: {
     water: '#35598a',
     waterAlpha: [0.1, 0.17, 0.27],
-    tints: ['#0f766e', '#1d64c2', '#2f7d32'],
+    tints: {
+      dawn: ['#db2777', '#d97706', '#2563eb'],
+      day: ['#0f766e', '#1d64c2', '#2f7d32'],
+      dusk: ['#c2410c', '#9333ea', '#b45309'],
+      night: ['#1e3a8a', '#4338ca', '#0f5f6e'],
+    },
     ring: ['#1d64c2', 0.6],
     mirror: '#1b2230',
     mirrorAlpha: [0.32, 0.21, 0.12],
     leaf: ['#2f7d32', 0.8],
     lotus: ['#d6457f', 0.9],
     food: ['#8a5a2b', 0.9],
+    frog: ['#2f7d32', 0.95],
+    moon: ['#a37f00', 0.7],
+    glow: '#6b8e00',
+    glowAlpha: [0.9, 0.35],
+    label: ['#566072', 0.9],
     koi: ['#e04a1f', '#9c9384', '#1f2633', '#d9a011', '#4f76ad'],
     spring: [['#e0679a', 0.85], ['#d6457f', 0.75]],
     summer: [['#4c9a48', 0.8], ['#7a9a2a', 0.8]],
@@ -56,7 +80,11 @@ const MIRROR = 4; // + 0, 1 or 2, from the waterline down
 const LEAF = 7;
 const LOTUS = 8;
 const FOOD = 9;
-const KOI = 10; // + color * DEPTHS.length + depth
+const FROG = 10;
+const MOON = 11;
+const GLOW = 12; // + 0 lit, or 1 fading
+const LABEL = 14;
+const KOI = 15; // + color * DEPTHS.length + depth
 const [RED, WHITE, BLACK, GOLD, BLUE] = [0, 1, 2, 3, 4];
 const DEPTHS = [0.95, 0.66, 0.42, 0.24]; // a koi's opacity, from at the surface to deep down
 const DRIFT = KOI + 5 * DEPTHS.length; // + the season's color
@@ -120,6 +148,8 @@ const canvas = document.getElementById('ascii');
 const ctx = canvas.getContext('2d');
 const still = matchMedia('(prefers-reduced-motion: reduce)');
 const dark = matchMedia('(prefers-color-scheme: dark)');
+const asked = new URLSearchParams(location.search); // a season, time or weather to show instead
+const south = southern();
 const season = seasonNow();
 
 // ---------- 2D simplex noise, after Stefan Gustavson's public-domain version ----------
@@ -233,7 +263,7 @@ const ripples = [];
 const food = [];
 const drifts = []; // what the season blew in
 let gusts = 0; // how many more are due to blow in
-const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0 };
+const pointer = { x: 0, y: 0, t: 0, on: false, speed: 0, travel: 0, touch: false, free: false };
 const clearings = [...document.querySelectorAll('[data-clear]')];
 let boxes = [];
 let lure = null; // a data-lure element being hovered or focused: { el, box, koi it draws }
@@ -247,6 +277,10 @@ function setTheme() {
     theme.leaf,
     theme.lotus,
     theme.food,
+    theme.frog,
+    theme.moon,
+    ...theme.glowAlpha.map((a) => [theme.glow, a]),
+    theme.label,
   ];
   for (const color of theme.koi) for (const a of DEPTHS) styles.push([color, a]);
   styles.push(...theme[season]);
@@ -287,7 +321,12 @@ function resize() {
     // the pond starts with most of the season already on it (or, for snow, falling)
     const { melts } = SEASONS[season];
     while (drifts.length < plenty() * (melts ? 1 : 0.7)) blowIn(melts);
+    for (let i = 0; i < 16 * roomy(); i++) {
+      const [x, y] = [Math.random() * W, Math.random() * H];
+      flies.push({ x, y, rate: 0.6 + Math.random() * 0.8, seed: Math.random() * 99 }); // rate: of blinking
+    }
   }
+  if (!frog.leap && !frog.back) frog.on = perch(true);
 }
 
 // the text itself, not its whole block, so a short heading doesn't clear the full width
@@ -474,8 +513,8 @@ function swim(f, t, dt) {
   f.x += Math.cos(f.angle) * f.speed * dt;
   f.y += Math.sin(f.angle) * f.speed * dt;
   f.phase += dt * (1.6 + f.speed * 0.07);
-  // now and then a koi sinks deeper, fading; it comes up to feed
-  const deep = meal ? 0 : clamp01(noise(t * 0.04, f.seed + 40) * 1.5 + 0.15);
+  // now and then a koi sinks deeper, fading, and more so in the rain; it comes up to feed
+  const deep = meal ? 0 : clamp01(noise(t * 0.04, f.seed + 40) * 1.5 + 0.15 + rain * 0.5);
   f.depth += (deep - f.depth) * Math.min(1, dt * 0.6);
 
   // the body follows the head, keeping each bend gentle
@@ -664,6 +703,8 @@ function ripple(x, y, strength, t) {
 
 // whether a point is near a ripple's rings, given how far it is from where the ripple started
 const touches = (rp, d, t) => Math.abs(d - (t - rp.t) * rp.speed + rp.rings * 11) < rp.rings * 11 + ch;
+// whether a point (dx, dy from where a ripple started) is past its outer ring: a quick look first
+const beyond = (rp, dx, dy, t) => Math.max(Math.abs(dx), Math.abs(dy)) > (t - rp.t) * rp.speed + ch;
 
 // how far the swell of the ripples passing a point bends the light through it, in bendX and bendY
 let bendX = 0;
@@ -674,6 +715,7 @@ function bend(px, py, t) {
   for (const rp of ripples) {
     const dx = px - rp.x;
     const dy = py - rp.y;
+    if (beyond(rp, dx, dy, t)) continue;
     const d = Math.hypot(dx, dy) || 1;
     if (!touches(rp, d, t)) continue;
     const off = d - (t - rp.t) * rp.speed;
@@ -699,20 +741,24 @@ function clearAt(px, py, skip) {
 
 // ---------- the season ----------
 
-// The season where the visitor is, by the month, turned around south of the equator (where the
-// browser can tell: summer time falls in January there), or the one asked for in the address
+// whether the visitor is south of the equator, where the browser can tell: summer time falls in
+// January there
+function southern() {
+  const year = new Date().getFullYear();
+  return new Date(year, 0, 1).getTimezoneOffset() < new Date(year, 6, 1).getTimezoneOffset();
+}
+
+// the season where the visitor is, by the month (turned around south of the equator), or as asked
 function seasonNow() {
-  const asked = new URLSearchParams(location.search).get('season');
-  if (Object.keys(SEASONS).includes(asked)) return asked;
-  const now = new Date();
-  const year = now.getFullYear();
-  const south = new Date(year, 0, 1).getTimezoneOffset() < new Date(year, 6, 1).getTimezoneOffset();
-  const month = (now.getMonth() + (south ? 6 : 0)) % 12;
+  if (Object.keys(SEASONS).includes(asked.get('season'))) return asked.get('season');
+  const month = (new Date().getMonth() + (south ? 6 : 0)) % 12;
   return ['winter', 'spring', 'summer', 'autumn'][Math.floor(((month + 1) % 12) / 3)];
 }
 
-// how many of the season to have at a time, for the size of the screen
-const plenty = () => Math.round(SEASONS[season].count * Math.min(Math.max((W * H) / 1.3e6, 0.4), 1.3));
+// how much to scale things by for the size of the screen, against about 1440×900
+const roomy = () => Math.min(Math.max((W * H) / 1.3e6, 0.4), 1.3);
+// how many of the season to have at a time
+const plenty = () => Math.round(SEASONS[season].count * roomy());
 
 // A gust's worth somewhere over the pond, in the air or already on the water: a little flurry of
 // petals or leaves, which land together and spread apart, or a single flake of snow
@@ -796,6 +842,205 @@ function settle(aloft) {
       chars[r * cols + c] = d.glyph || strokeChar(dx, dy);
       looks[r * cols + c] = DRIFT + d.color;
     }
+  }
+}
+
+// ---------- the time of day, and the weather ----------
+
+const TIMES = ['dawn', 'day', 'dusk', 'night'];
+let time = timeNow();
+let clock = 0; // when to look at the clock again
+// how far through its month the moon is: 0 new, 0.5 full (from a new moon on 6 January 2000)
+const moonAge = ((((Date.now() - Date.UTC(2000, 0, 6, 18, 14)) / 864e5 / 29.530588) % 1) + 1) % 1;
+const flies = []; // fireflies, out at night
+let rain = 0; // how hard it's raining, 0..1
+let shower = null; // when the next shower starts and stops, in seconds
+let drops = 0; // how many raindrops are due
+
+// the time of day where the visitor is, by their clock, or as asked
+function timeNow() {
+  if (TIMES.includes(asked.get('time'))) return asked.get('time');
+  const now = new Date();
+  const hour = now.getHours() + now.getMinutes() / 60;
+  return hour < 5 ? 'night' : hour < 7 ? 'dawn' : hour < 17.5 ? 'day' : hour < 20 ? 'dusk' : 'night';
+}
+
+// Whether a point on the moon's face (in its radii, from its middle) is lit. Its terminator is half
+// an ellipse: the lit side grows from the right as the moon waxes and shrinks to the left as it
+// wanes, the other way round south of the equator.
+function moonlit(x, y) {
+  const side = (moonAge < 0.5) !== south ? x : -x;
+  return side > Math.cos(2 * Math.PI * moonAge) * Math.sqrt(1 - y * y);
+}
+
+// at night, the moon's reflection: a disc of streaks, each row swaying as the surface tilts
+function drawMoon(t) {
+  if (time !== 'night' || moonAge < 0.03 || moonAge > 0.97) return; // a new moon shows nothing
+  const R = Math.min(Math.max(Math.min(W, H) * 0.045, 18), 44);
+  const [mx, my] = [W * 0.7, Math.max(H * 0.12, R + ch)];
+  for (let r = Math.max(0, Math.floor((my - R) / ch)); r <= Math.min(rows - 1, (my + R) / ch); r++) {
+    for (let c = Math.max(0, Math.floor((mx - R) / cw) - 2); c <= Math.min(cols - 1, (mx + R) / cw + 2); c++) {
+      const i = r * cols + c;
+      if (clear[i] < 0.3) continue;
+      const [px, py] = [(c + 0.5) * cw, (r + 0.5) * ch];
+      bend(px, py, t);
+      const sway = Math.sin(r * 1.7 - t * 1.5) * 2 + noise(r * 0.4, t * 0.3) * 3 + bendX;
+      const x = (px - sway - mx) / R;
+      const y = (py - bendY * 0.5 - my) / R;
+      if (x * x + y * y > 1 || !moonlit(x, y)) continue;
+      chars[i] = x * x + y * y > 0.6 ? 45 : 61; // - at the rim, = across it
+      looks[i] = MOON;
+    }
+  }
+}
+
+// fireflies wander slowly over the water, wrapping round the edges
+function flit(t, dt) {
+  for (const f of flies) {
+    f.x = (f.x + noise(t * 0.15, f.seed) * 25 * dt + W + 20) % (W + 20);
+    f.y = (f.y + noise(f.seed, t * 0.15) * 18 * dt + H + 20) % (H + 20);
+  }
+}
+
+// and blink, on spring and summer nights: a bright flash, fading, then dark for a while
+function drawFlies(t) {
+  if (time !== 'night' || season === 'autumn' || season === 'winter') return;
+  for (const f of flies) {
+    const glow = Math.sin(t * f.rate + f.seed);
+    const [c, r] = [Math.floor(f.x / cw), Math.floor(f.y / ch)];
+    if (glow < 0.3 || c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
+    chars[r * cols + c] = glow > 0.75 ? 42 : 46; // * .
+    looks[r * cols + c] = GLOW + (glow > 0.75 ? 0 : 1);
+  }
+}
+
+// Now and then a shower passes (but not while it snows): it swells and dies away over half a minute
+// or so, each raindrop dimpling the surface with a small ring
+function rainfall(t, dt) {
+  if (asked.get('weather') === 'rain') rain = 1;
+  else if (season === 'winter') rain = 0;
+  else {
+    if (!shower || t > shower[1]) {
+      const start = t + (shower ? 120 + Math.random() * 360 : 10 + Math.random() * 140);
+      shower = [start, start + 25 + Math.random() * 25];
+    }
+    rain = t > shower[0] ? Math.sin((Math.PI * (t - shower[0])) / (shower[1] - shower[0])) : 0;
+  }
+  for (drops += dt * rain * 10 * roomy(); drops >= 1; drops--) ripple(Math.random() * W, Math.random() * H, 0.4, t);
+}
+
+// ---------- the frog ----------
+// A frog sits on a lily pad. A click near it sends it leaping into the water with a splash, and a
+// while later it climbs back out onto a pad.
+
+const FROG_ART = [' @..@ ', '(----)'];
+const CROAK_ART = [' @..@ ', '(-()-)'];
+const LEAP = 0.55; // seconds in the air
+const frog = { on: null, leap: null, back: 0 }; // its pad; its leap, while in the air; when it's back
+
+// a pad for the frog, whole on the screen and without a flower: the biggest, or any
+function perch(biggest) {
+  const open = lilies.filter((p) => !p.flower && p.x > p.r && p.x < W - p.r && p.y > p.r && p.y < H - p.r);
+  if (!open.length) return null;
+  return biggest ? open.reduce((a, b) => (b.r > a.r ? b : a)) : open[Math.floor(Math.random() * open.length)];
+}
+
+// where the frog sits on its pad: just off the middle, away from the notch
+function frogAt() {
+  const p = frog.on;
+  return [p.x - Math.cos(p.angle) * p.r * 0.1, p.y - Math.sin(p.angle) * p.r * 0.1];
+}
+
+function hop(t) {
+  if (frog.leap && t - frog.leap.t > LEAP) {
+    ripple(frog.leap.x1, frog.leap.y1, 0.8, t); // plop
+    frog.leap = null;
+    frog.back = t + 8 + Math.random() * 10;
+  } else if (frog.back && t > frog.back) {
+    frog.on = perch(false);
+    frog.back = 0;
+    if (frog.on) ripple(frog.on.x + frog.on.r, frog.on.y, 0.35, t); // climbing out
+  }
+}
+
+// sends the frog leaping away from a click near it
+function spook(x, y, t) {
+  if (!frog.on) return;
+  const [fx, fy] = frogAt();
+  const d = Math.hypot(fx - x, fy - y);
+  if (d > 110) return;
+  const a = d > 1 ? Math.atan2(fy - y, fx - x) : Math.random() * 2 * Math.PI;
+  const reach = frog.on.r + 70;
+  const [x1, y1] = [fx + Math.cos(a) * reach, fy + Math.sin(a) * reach * 0.8];
+  // into water it can be seen landing in
+  frog.leap = { t, x0: fx, y0: fy, x1: Math.min(Math.max(x1, 40), W - 40), y1: Math.min(Math.max(y1, 40), H - 40) };
+  frog.on = null;
+}
+
+// the frog sitting (aloft false), now and then puffing its throat to croak, or leaping (true)
+function drawFrog(t, aloft) {
+  let x;
+  let y;
+  if (aloft && frog.leap) {
+    const k = Math.min(1, (t - frog.leap.t) / LEAP);
+    x = frog.leap.x0 + (frog.leap.x1 - frog.leap.x0) * k;
+    y = frog.leap.y0 + (frog.leap.y1 - frog.leap.y0) * k - Math.sin(Math.PI * k) * 30;
+  } else if (!aloft && frog.on) [x, y] = frogAt();
+  else return;
+  const art = !aloft && noise(t * 0.5, 7) > 0.55 ? CROAK_ART : FROG_ART;
+  const r0 = Math.round(y / ch) - 1;
+  const c0 = Math.round(x / cw - art[0].length / 2);
+  art.forEach((line, dr) => {
+    for (let dc = 0; dc < line.length; dc++) {
+      const [r, c] = [r0 + dr, c0 + dc];
+      if (line[dc] === ' ' || c < 0 || c >= cols || r < 0 || r >= rows || clear[r * cols + c] < 0.3) continue;
+      chars[r * cols + c] = line.charCodeAt(dc);
+      looks[r * cols + c] = FROG;
+    }
+  });
+}
+
+// ---------- koi names ----------
+
+const NAMES = {
+  kohaku: 'kohaku: red on white',
+  sanke: 'sanke: red and black on white',
+  showa: 'showa: red and white on black',
+  tancho: 'tancho: a red crown',
+  ogon: 'ogon: gold all over',
+  asagi: 'asagi: blue back, red sides',
+};
+let named = null; // the koi last pointed at,
+let namedUntil = 0; // and until when its name shows
+
+// names the koi nearest the surface at a point, if there's one there
+function notice(x, y, t) {
+  for (const f of [...koi].sort((a, b) => a.depth - b.depth)) {
+    koiDist(f, x, y);
+    if (near < 6) {
+      named = f;
+      namedUntil = t + 1.5;
+      return;
+    }
+  }
+}
+
+// the name, on a clear patch of water just ahead of the koi, where its body isn't
+function drawName(t) {
+  if (!named || t > namedUntil) return;
+  const text = NAMES[named.kind];
+  const [dx, dy] = [Math.cos(named.angle), Math.sin(named.angle)];
+  const gap = named.len * 0.15 + 2 * cw;
+  let [x, y] = [named.x, named.y]; // where the name's middle goes
+  if (Math.abs(dx) > 0.4) x += Math.sign(dx) * (gap + (text.length * cw) / 2);
+  else y += Math.sign(dy) * (gap + ch);
+  const r = Math.min(Math.max(0, Math.floor(y / ch)), rows - 1);
+  const c0 = Math.min(Math.max(0, Math.round(x / cw - text.length / 2)), cols - text.length);
+  for (let k = 0; k < text.length; k++) {
+    const i = r * cols + c0 + k;
+    if (c0 + k < 0 || clear[i] < 0.3) continue;
+    chars[i] = text.charCodeAt(k);
+    looks[i] = LABEL;
   }
 }
 
@@ -907,8 +1152,16 @@ function step(t, dt) {
     p.y = p.ay + noise(p.seed, t * 0.05) * 6;
     p.angle += noise(t * 0.03, p.seed + 5) * 0.05 * dt;
   }
+  if (t > clock) {
+    time = timeNow();
+    clock = t + 30;
+  }
+  rainfall(t, dt);
   for (const f of koi) swim(f, t, dt);
   blow(t, dt);
+  flit(t, dt);
+  hop(t);
+  if (pointer.on && pointer.free && !pointer.touch) notice(pointer.x, pointer.y, t);
 }
 
 // where a cell lies, for a look
@@ -979,6 +1232,7 @@ function draw(t) {
       for (const rp of ripples) {
         const dx = px - rp.x;
         const dy = py - rp.y;
+        if (beyond(rp, dx, dy, t)) continue;
         const d = Math.hypot(dx, dy) || 1;
         if (!touches(rp, d, t)) continue;
         const radius = (t - rp.t) * rp.speed;
@@ -1007,6 +1261,7 @@ function draw(t) {
   }
 
   for (const m of mirrors) reflect(m, textBox(m.el), t);
+  drawMoon(t);
 
   // the koi, the deepest first, so those nearer the surface pass over them
   for (const f of [...koi].sort((a, b) => b.depth - a.depth)) {
@@ -1035,8 +1290,9 @@ function draw(t) {
     stamp(p.fx - fm, p.fy - fm, p.fx + fm, p.fy + fm, (x, y) => flowerDist(p, x, y), flowerLook);
   }
 
-  // the season on the water, floating over koi and pads alike
+  // the season on the water, floating over koi and pads alike, and the frog on its pad
   settle(false);
+  drawFrog(t, false);
   for (const p of food) {
     const c = Math.floor(p.x / cw);
     const r = Math.floor(p.y / ch);
@@ -1044,7 +1300,11 @@ function draw(t) {
     chars[r * cols + c] = 111; // o
     looks[r * cols + c] = FOOD;
   }
+  drawName(t);
+  // and above it all, whatever's in the air
   settle(true);
+  drawFlies(t);
+  drawFrog(t, true);
 
   ctx.clearRect(0, 0, W, H);
   paint(0, LEAF);
@@ -1052,7 +1312,7 @@ function draw(t) {
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-atop';
   const size = Math.max(W, H) * 0.5;
-  theme.tints.forEach((tint, i) => {
+  theme.tints[time].forEach((tint, i) => {
     const x = W * (0.5 + 0.45 * Math.sin(t * (0.05 + i * 0.013) + i * 2.1));
     const y = H * (0.5 + 0.45 * Math.cos(t * (0.04 + i * 0.017) + i * 1.3));
     wash(x, y, size, tint, 0.7);
@@ -1123,12 +1383,19 @@ addEventListener('pointermove', (e) => {
   pointer.y = e.clientY;
   pointer.t = t;
   pointer.on = true;
+  pointer.touch = e.pointerType === 'touch';
+  // over open water, not the page's own text or cards
+  pointer.free = !(e.target instanceof Element && e.target.closest('a, h1, h2'));
 });
 addEventListener('pointerdown', (e) => {
   const t = performance.now() / 1000;
   ripple(e.clientX, e.clientY, 1, t);
+  if (still.matches) return;
+  spook(e.clientX, e.clientY, t);
+  // a tap names a koi, as resting the pointer on one does
+  if (!(e.target instanceof Element && e.target.closest('a, h1, h2'))) notice(e.clientX, e.clientY, t);
   // a few pellets of food, scattered where they land
-  for (let i = 0; i < 4 && !still.matches; i++) {
+  for (let i = 0; i < 4; i++) {
     const a = Math.random() * 2 * Math.PI;
     const d = 6 + Math.random() * 22;
     food.push({ x: e.clientX + Math.cos(a) * d, y: e.clientY + Math.sin(a) * d * 0.7, t, seed: Math.random() * 100 });
