@@ -855,12 +855,13 @@ function bend(px, py, t) {
 // bounce off the pond's edges and die away. What drops in, what swims by and the pointer push it.
 // Over it runs the wind's long swell. It's drawn in lines, as woodblock prints draw water: where the
 // height passes a level, an outline character runs along it, like the koi's and the pads'. The
-// swell's lines flow across the pond, and the ripples' own crests ride over them, brighter.
+// swell's lines flow across the pond, and the ripples' own crests ride over them, brighter, each
+// with its trough beside it, so a push shows the moment it's made.
 
 const SPAN = 8; // px between the surface's points
 const PULL = 0.08; // how hard each point is pulled toward its neighbors a step: the waves' speed
 const CALM = 0.992; // how much of a wave is left after a step
-const CREST = 0.25; // the height a ripple's crest is drawn at
+const CREST = 0.25; // the height a ripple's crest is drawn at (and the depth its trough is)
 let across = 0; // points across the surface, and down it
 let down = 0;
 let wave = new Float32Array(0); // the surface's height at each point,
@@ -928,14 +929,15 @@ function contour(i, h, gx, gy, level, style) {
   return true;
 }
 
-// One cell of the water: first the ripples' crests, bright (fainter in clear space); then the
-// swell's lines, flowing across, bent by a slow noise so they never run straight, and by the ripples
-// as they pass
+// One cell of the water: first the ripples' crests, bright, and troughs, dimmer (both fainter in
+// clear space); then the swell's lines, flowing across, bent by a slow noise so they never run
+// straight, and by the ripples as they pass
 function waveCell(i, px, py, k, t) {
   let h = heightAt(px, py);
   slope(px, py);
   let [gx, gy] = [slopeX, slopeY];
   if (contour(i, h, gx, gy, CREST, k > 0.7 ? RING : 2)) return;
+  if (contour(i, h, gx, gy, -CREST, k > 0.7 ? 2 : 1)) return;
   const bent = noise(px * 0.002, py * 0.004 + t * 0.03) * 2.5;
   for (const [kx, ky, speed, height] of SWELL) {
     const phase = kx * px + ky * py - speed * t + bent;
@@ -1697,15 +1699,16 @@ addEventListener('pointermove', (e) => {
   const moved = Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y);
   if (pointer.on) {
     pointer.speed = Math.max(pointer.speed, moved / Math.max(t - pointer.t, 0.016));
-    // the pointer drags a wake: small rings as it goes
+    // the pointer drags a wake: small rings as it goes, or on the waves, pushes like a finger
+    // trailed through the water
     pointer.travel += moved;
-    if (pointer.travel > 45) {
+    if (pointer.travel > (look === 'waves' ? 10 : 45)) {
       pointer.travel = 0;
-      ripple(e.clientX, e.clientY, 0.45, t);
+      if (look === 'waves') poke(e.clientX, e.clientY, -0.32, 7);
+      else ripple(e.clientX, e.clientY, 0.45, t);
     }
   }
   if (moved > 3) pointer.movedAt = t;
-  if (look === 'waves' && pointer.on && !still.matches) poke(e.clientX, e.clientY, -0.06 * Math.min(1, moved / 25), 8);
   pointer.x = e.clientX;
   pointer.y = e.clientY;
   pointer.t = t;
